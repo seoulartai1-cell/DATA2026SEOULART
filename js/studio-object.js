@@ -223,9 +223,12 @@
   function loadImage(img, title, autoDetect) {
     stopLive();
     const cv = document.createElement('canvas');
-    const maxDim = 720, ar = img.width / img.height;
-    cv.width = Math.min(maxDim, img.width); cv.height = Math.round(cv.width / ar);
-    cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+    // 표시·감지 해상도: 긴 변을 1600px까지 보존(원본보다 키우지 않음) — 720px로 줄여 흐릿해지던 문제 해결
+    const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+    const maxDim = 1600, scale = Math.min(1, maxDim / Math.max(iw, ih));
+    cv.width = Math.max(1, Math.round(iw * scale)); cv.height = Math.max(1, Math.round(ih * scale));
+    const cx = cv.getContext('2d'); if (cx.imageSmoothingQuality) cx.imageSmoothingQuality = 'high';
+    cx.drawImage(img, 0, 0, cv.width, cv.height);
     srcCanvas = cv; detections = []; render(); summarize();
     if (title) setStatus('‘' + title + '’ 불러옴 — ‘AI로 사물 감지’를 눌러 보세요.');
     if (autoDetect) detectReal();

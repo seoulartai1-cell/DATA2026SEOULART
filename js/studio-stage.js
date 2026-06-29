@@ -254,6 +254,7 @@
     const ar = W / H; let cw = cam.clientWidth || 320, ch = Math.round(cw / ar);
     cam.width = cw; cam.height = ch;
     const x = cam.getContext('2d');
+    if (x.imageSmoothingQuality) x.imageSmoothingQuality = 'high';
     x.save();
     if (state.mirror) { x.translate(cw, 0); x.scale(-1, 1); }
     x.drawImage(srcCanvas, 0, 0, cw, ch);
@@ -882,9 +883,13 @@
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = async () => {
       URL.revokeObjectURL(url);
-      const W = Math.min(960, img.width), H = Math.round(W * img.height / img.width);
+      // 긴 변 1280px까지 보존(원본보다 키우지 않음) — 감지·미리보기 화질 향상
+      const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+      const sc = Math.min(1, 1280 / Math.max(iw, ih));
+      const W = Math.max(1, Math.round(iw * sc)), H = Math.max(1, Math.round(ih * sc));
       srcCanvas = document.createElement('canvas'); srcCanvas.width = W; srcCanvas.height = H;
-      srcCanvas.getContext('2d').drawImage(img, 0, 0, W, H);
+      const sctx = srcCanvas.getContext('2d'); if (sctx.imageSmoothingQuality) sctx.imageSmoothingQuality = 'high';
+      sctx.drawImage(img, 0, 0, W, H);
       state.demo = false; state.live = false; state.mirror = false;
       setStatus('사진을 감지하는 중…');
       try {

@@ -10,7 +10,7 @@
  * 이 모듈의 방식:
  *   "정해진 용량 예산 안에서 가능한 한 큰·선명한 이미지"를 만든다.
  *     1) 긴 변을 maxDim 이하로만 축소(원본보다 키우지 않음).
- *     2) 높은 JPEG 품질(기본 0.85)로 인코딩.
+ *     2) 높은 JPEG 품질(기본 0.9)로 인코딩.
  *     3) 결과 dataURL 이 예산(budget, 글자 수≈바이트)을 넘으면 품질을 단계적으로 낮춘다.
  *     4) 품질 하한까지 낮춰도 크면 가로·세로를 줄여 다시 시도(하한 minDim 까지).
  *   → 어떤 사진이 들어와도 문서 1MB 한계 안에 '확실히' 들어가면서, 예전보다 훨씬 또렷하다.
@@ -50,7 +50,7 @@
    *   src         : 그릴 수 있는 소스(canvas/image/…)
    *   opts.maxDim     긴 변 상한(px). 기본 1600.
    *   opts.budget     dataURL 최대 길이(바이트 근사). 기본 700,000.
-   *   opts.quality    시작 JPEG 품질. 기본 0.85.
+   *   opts.quality    시작 JPEG 품질. 기본 0.9.
    *   opts.minQuality 품질 하한. 기본 0.55.
    *   opts.minDim     축소 하한(px). 기본 640.
    *   opts.type       'image/jpeg'(기본) | 'image/png'
@@ -64,7 +64,7 @@
     const type = opts.type || 'image/jpeg';
     const isPng = type === 'image/png';            // PNG 는 품질 인자가 무의미 → 크기 축소로만 줄인다
     const budget = opts.budget || 700000;
-    const startQ = opts.quality != null ? opts.quality : 0.85;
+    const startQ = opts.quality != null ? opts.quality : 0.9;
     const minQ = opts.minQuality != null ? opts.minQuality : 0.55;
     const minDim = opts.minDim || 640;
     let maxDim = opts.maxDim || 1600;

@@ -95,9 +95,12 @@
   /* ----------------------------- 상태 ----------------------------- */
   const state = {
     scene: 'ages', faceOn: false, preview: true, mirror: true,
-    live: false, demo: true, reveal: false
+    live: false, demo: true, reveal: false, sound: false, statRec: false, replay: false
   };
   let biasLog = [];   // 오분류(편향) 기록 — '기계의 눈' 비평용
+  // ③ 세션 데이터(시계열) · ⑧ 상연
+  let statSamples = [], statSnaps = [], statStartT = null, lastSample = -99, lastSnap = -99, replayStartT = null;
+  let statsCv = null, statsCtx = null;
   // 평가 루브릭 5영역(미술교육: 의도·근거·조형·비평·윤리)
   const RUBRIC = [
     { key: 'intent', label: '의도 — 작품이 던지는 질문이 분명한가' },
@@ -428,9 +431,26 @@
 
   function loop(ts) {
     const t = ts / 1000;
-    if (state.demo) entities = demoEntities(t);
+    if (state.replay && statSnaps.length) {                       // ⑧ 데이터로 상연
+      if (replayStartT == null) replayStartT = t;
+      const dur = (statSnaps[statSnaps.length - 1].t || 1) + 0.001;
+      const pt = (t - replayStartT) % dur;
+      let lo = 0; for (let i = 0; i < statSnaps.length; i++) { if (statSnaps[i].t <= pt) lo = i; else break; }
+      entities = statSnaps[lo].ents;
+    } else if (state.demo) entities = demoEntities(t);
+    // ③ 세션 표본/장면 기록
+    if (state.statRec) {
+      if (statStartT == null) statStartT = t;
+      const rt = t - statStartT;
+      if (rt - lastSample >= 1) {
+        lastSample = rt; const a = aggregate();
+        statSamples.push({ t: Math.round(rt), persons: a.persons, animals: a.animals, objects: a.objects, child: a.child, youth: a.youth, adult: a.adult, elder: a.elder, happy: a.happy, sad: a.sad, surprised: a.surprised, angry: a.angry, neutral: a.neutral, glasses: a.glasses, conf: a.conf });
+        drawStats(); updateDist(a);
+      }
+      if (!state.replay && rt - lastSnap >= 0.25 && statSnaps.length < 1600) { lastSnap = rt; statSnaps.push({ t: rt, ents: entities.map(snapEnt) }); }
+    }
     drawArt(t);
-    if (state.demo) { renderChipsThrottled(t); }
+    if (state.demo || state.replay) { renderChipsThrottled(t); }
     raf = requestAnimationFrame(loop);
   }
   let lastChip = 0;
@@ -638,6 +658,194 @@
     setStatus('비평·평가를 내려받았어요(.md).');
   }
 
+  /* ----------------------------- ③ 세션 데이터(시계열) ----------------------------- */
+  function aggregate() {
+    const a = { persons: 0, animals: 0, objects: 0, child: 0, youth: 0, adult: 0, elder: 0, happy: 0, sad: 0, surprised: 0, angry: 0, neutral: 0, glasses: 0, confSum: 0, n: 0 };
+    entities.forEach(e => {
+      a.n++; a.confSum += (e.score || 0);
+      if (e.kind === 'animal') a.animals++;
+      else if (e.kind === 'object') a.objects++;
+      else { a.persons++; if (a[e.kind] != null && /child|youth|adult|elder/.test(e.kind)) a[e.kind]++; if (e.glasses) a.glasses++; }
+      if (e.emotion && a[e.emotion] != null) a[e.emotion]++;
+    });
+    a.conf = a.n ? a.confSum / a.n : 0;
+    return a;
+  }
+  function snapEnt(e) { return { cx: e.cx, cy: e.cy, w: e.w, h: e.h, kind: e.kind, score: e.score, age: e.age, gender: e.gender, emotion: e.emotion, glasses: e.glasses, label: e.label, hue: e.hue, ph: e.ph }; }
+  function toggleStatRec() {
+    const btn = $('#btn-stg-stat');
+    if (!state.statRec) {
+      state.statRec = true; statSamples = []; statSnaps = []; statStartT = null; lastSample = -99; lastSnap = -99;
+      if (btn) { btn.textContent = '■ 세션 기록 중지'; btn.classList.add('rec'); }
+      setStatus('📈 세션 기록 시작 — 시간에 따른 관객을 데이터로 쌓는 중. (영상은 저장 안 됨)');
+    } else {
+      state.statRec = false;
+      if (btn) { btn.textContent = '● 세션 기록 시작'; btn.classList.remove('rec'); }
+      setStatus('세션 기록 중지 · ' + statSamples.length + '개 표본 · ' + statSnaps.length + '장면 — 내보내거나 ‘데이터로 상연’ 해 보세요.');
+    }
+  }
+  function drawStats() {
+    if (!statsCtx) { statsCv = $('#stg-stats'); if (statsCv) statsCtx = statsCv.getContext('2d'); }
+    if (!statsCtx) return;
+    const W = statsCv.width, H = statsCv.height, n = statSamples.length;
+    statsCtx.fillStyle = '#05070c'; statsCtx.fillRect(0, 0, W, H);
+    if (n < 2) { statsCtx.fillStyle = '#566'; statsCtx.font = '12px sans-serif'; statsCtx.textAlign = 'center'; statsCtx.fillText('기록을 시작하면 인원 추이가 그려져요', W / 2, H / 2); return; }
+    const mx = Math.max(1, ...statSamples.map(s => s.n));
+    const line = (key, color) => {
+      statsCtx.strokeStyle = color; statsCtx.lineWidth = 2; statsCtx.beginPath();
+      statSamples.forEach((s, i) => { const x = (i / (n - 1)) * W, y = H - 6 - (s[key] / mx) * (H - 12); i ? statsCtx.lineTo(x, y) : statsCtx.moveTo(x, y); });
+      statsCtx.stroke();
+    };
+    line('persons', '#93A4E8'); line('animals', '#2FB6A8');
+    statsCtx.fillStyle = '#7b86a6'; statsCtx.font = '10px sans-serif'; statsCtx.textAlign = 'left';
+    statsCtx.fillText('인원(파랑)·동물(청록) · 최대 ' + mx + ' · ' + statSamples[n - 1].t + 's', 8, 12);
+  }
+  function bar(label, v, total, hue) {
+    const pct = total ? Math.round(v / total * 100) : 0;
+    return '<div class="stg-bar"><div class="lab"><span>' + label + '</span><span>' + v + (total ? ' · ' + pct + '%' : '') + '</span></div><div class="track"><i class="fill" style="width:' + pct + '%' + (hue != null ? ';background:hsl(' + hue + ',70%,55%)' : '') + '"></i></div></div>';
+  }
+  function updateDist(a) {
+    const host = $('#stg-dist'); if (!host) return;
+    const p = a.persons || 1, emoTot = a.happy + a.sad + a.surprised + a.angry + a.neutral || 1;
+    host.innerHTML =
+      bar('아이', a.child, p, 330) + bar('청년', a.youth, p, 150) + bar('어른', a.adult, p, 205) + bar('노년', a.elder, p, 40) + bar('안경', a.glasses, p, 0) +
+      bar('기쁨', a.happy, emoTot, 50) + bar('슬픔', a.sad, emoTot, 215) + bar('놀람', a.surprised, emoTot, 285) + bar('화남', a.angry, emoTot, 2) + bar('무표정', a.neutral, emoTot, 0);
+  }
+  const STAT_COLS = ['t', '인원', '동물', '사물', '아이', '청년', '어른', '노년', '기쁨', '슬픔', '놀람', '화남', '무표정', '안경', '평균신뢰도'];
+  function statRow(s) { return [s.t, s.persons, s.animals, s.objects, s.child, s.youth, s.adult, s.elder, s.happy, s.sad, s.surprised, s.angry, s.neutral, s.glasses, Math.round((s.conf || 0) * 100)]; }
+  function statCSV() { return STAT_COLS.join(',') + '\n' + statSamples.map(s => statRow(s).join(',')).join('\n'); }
+  function exportStatsCSV() {
+    if (statSamples.length < 1) { UI.toast('기록된 세션이 없어요. ‘세션 기록 시작’을 먼저 누르세요.'); return; }
+    const blob = new Blob(['﻿' + statCSV()], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.download = 'session_timeseries_' + Date.now() + '.csv'; a.href = URL.createObjectURL(blob); a.click();
+    setStatus('시계열 CSV를 저장했어요 · ' + statSamples.length + '행.');
+  }
+  function sendStatsToData() {
+    if (statSamples.length < 2) { UI.toast('세션을 조금 더 기록한 뒤 보내 주세요.'); return; }
+    const payload = { name: '라이브 렌즈 · 세션 시계열', csv: statCSV(), issue: '🪞 라이브 렌즈 세션 — 시간(t)에 따른 인원·나이대·감정. 시간을 가로축으로, 인원·감정을 점의 크기·색으로 바꿔 보세요.', intent: '', omit: '카메라 화각 밖·짧은 등장은 누락 — 표본의 한계' };
+    try { localStorage.setItem('dn_data_incoming', JSON.stringify(payload)); } catch (e) { UI.toast('전송 실패(용량).'); return; }
+    UI.toast('세션 시계열을 데이터 점 스튜디오로 보냈어요!');
+    setTimeout(() => location.href = 'studio-data.html', 500);
+  }
+
+  /* ----------------------------- ⑧ 데이터로 다시 상연 ----------------------------- */
+  function clearReplay() {
+    if (!state.replay) return;
+    state.replay = false; const btn = $('#btn-stg-replay'); if (btn) { btn.textContent = '▶ 데이터로 상연'; btn.classList.remove('rec'); }
+  }
+  function toggleReplay() {
+    const btn = $('#btn-stg-replay');
+    if (!state.replay) {
+      if (statSnaps.length < 2) { UI.toast('상연할 데이터가 없어요. ‘세션 기록’을 먼저 해 주세요.'); return; }
+      stopCam(); state.demo = false; state.replay = true; replayStartT = null;
+      if (btn) { btn.textContent = '■ 상연 중지'; btn.classList.add('rec'); }
+      setStatus('▶ 데이터로 상연 — 카메라 없이, 기록된 데이터가 작품을 다시 살려요(' + statSnaps.length + '장면).');
+    } else {
+      state.replay = false; state.demo = true;
+      if (btn) { btn.textContent = '▶ 데이터로 상연'; btn.classList.remove('rec'); }
+      setStatus('상연을 멈췄어요 — 가상 관객 데모로 돌아왔어요.');
+    }
+  }
+  function exportReplay() {
+    if (statSnaps.length < 2) { UI.toast('상연 데이터가 없어요. ‘세션 기록’을 먼저 해 주세요.'); return; }
+    const data = { app: 'live-lens-replay', v: 1, scene: state.scene, snaps: statSnaps };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const a = document.createElement('a'); a.download = 'replay_' + Date.now() + '.json'; a.href = URL.createObjectURL(blob); a.click();
+    setStatus('상연 데이터(JSON)를 저장했어요 · ' + statSnaps.length + '장면.');
+  }
+  function loadReplayFile(file) {
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const d = JSON.parse(r.result);
+        if (!d || !Array.isArray(d.snaps) || d.snaps.length < 2) { UI.toast('상연 데이터 형식이 아니에요.'); return; }
+        statSnaps = d.snaps; if (d.scene && SCENES[d.scene]) selectScene(d.scene);
+        state.replay = false; toggleReplay();   // 바로 상연 시작
+        UI.toast('상연 데이터를 불러와 재생해요 · ' + statSnaps.length + '장면.');
+      } catch (e) { UI.toast('JSON을 읽지 못했어요.'); }
+    };
+    r.readAsText(file);
+  }
+
+  /* ----------------------------- ⑤ 생성 사운드(Web Audio) ----------------------------- */
+  const SoundEngine = (function () {
+    let ac = null, master = null, pad = [], sched = null, on = false;
+    const SCALE = [0, 2, 4, 7, 9];          // 펜타토닉
+    const fr = semi => 220 * Math.pow(2, semi / 12);
+    function kindSemi(e) {
+      const base = { child: 24, youth: 12, adult: 0, elder: -12, person: 5, animal: 7, object: -5 }[e.kind] || 0;
+      const deg = SCALE[Math.abs(((e.cx || 0.5) * 7) | 0) % SCALE.length];
+      return base + deg;
+    }
+    function tick() {
+      if (!on || !ac || !entities.length) return;
+      const persons = entities.filter(e => e.kind !== 'animal' && e.kind !== 'object').length;
+      if (master) master.gain.setTargetAtTime(clamp(0.05 + persons * 0.035, 0.05, 0.24), ac.currentTime, 0.3);
+      const e = entities[(Math.random() * entities.length) | 0];
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = e.emotion === 'angry' ? 'sawtooth' : e.emotion === 'happy' ? 'triangle' : e.emotion === 'surprised' ? 'square' : 'sine';
+      o.frequency.value = fr(kindSemi(e));
+      const t0 = ac.currentTime;
+      g.gain.setValueAtTime(0, t0); g.gain.linearRampToValueAtTime(0.12, t0 + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+      o.connect(g);
+      if (ac.createStereoPanner) { const p = ac.createStereoPanner(); p.pan.value = clamp((state.mirror ? 1 - e.cx : e.cx) * 2 - 1, -1, 1); g.connect(p); p.connect(master); }
+      else g.connect(master);
+      o.start(t0); o.stop(t0 + 0.55);
+    }
+    return {
+      isOn: () => on,
+      start() {
+        if (on) return;
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!AC) { UI.toast('이 브라우저는 오디오를 지원하지 않아요.'); return; }
+        ac = new AC(); master = ac.createGain(); master.gain.value = 0; master.connect(ac.destination);
+        pad = [0, 0.1].map(d => { const o = ac.createOscillator(); o.type = 'sine'; o.frequency.value = fr(-12) + d; const g = ac.createGain(); g.gain.value = 0.07; o.connect(g); g.connect(master); o.start(); return o; });
+        master.gain.linearRampToValueAtTime(0.16, ac.currentTime + 1.2);
+        on = true; sched = setInterval(tick, 650);
+      },
+      stop() {
+        if (!on) return; on = false; if (sched) clearInterval(sched);
+        pad.forEach(o => { try { o.stop(); } catch (e) {} }); pad = [];
+        try { master.disconnect(); } catch (e) {} try { ac.close(); } catch (e) {} ac = null;
+      }
+    };
+  })();
+  function toggleSound() {
+    const btn = $('#btn-stg-sound');
+    if (!SoundEngine.isOn()) { SoundEngine.start(); state.sound = true; if (btn) { btn.textContent = '🔊 사운드 끄기'; btn.classList.add('on'); } setStatus('🔊 생성 사운드 켜짐 — 종류=음높이, 감정=음색, 인원=두께.'); }
+    else { SoundEngine.stop(); state.sound = false; if (btn) { btn.textContent = '🔊 사운드 켜기'; btn.classList.remove('on'); } }
+  }
+
+  /* ----------------------------- 교사용 수업 계획서 ----------------------------- */
+  function exportLessonPlan() {
+    const md = [
+      '# 라이브 렌즈 — 수업 계획서(교사용)',
+      '대상: 고등학교 미술 · 연계 과목: 「미술과 매체」(융합선택) / 정보·사회(AI 윤리) / 수학(데이터)',
+      '핵심 개념: 상호작용성 · 시간성 · 생성성 · 관객참여 · 데이터기반',
+      '핵심 역량: 미적 감수성 · 창의융합 · 시각적 소통 · 비평적 사고',
+      '※ 성취기준 코드는 학교가 채택한 교육과정 문서에 맞춰 기입하세요(아래는 연계 방향).', '',
+      '## 차시 흐름 (체험–표현–감상)',
+      '- 1차시(체험): ‘기계의 눈’ 관찰 — AI가 나를 어떻게 분류하는지 보고 오분류 기록. 산출물: 오분류(편향) CSV·관찰 메모.',
+      '- 2차시(표현): 연출 사례 선택·매핑 설계 — 나이·감정·동물·안경을 색·움직임으로 해석. 산출물: 무대 영상(WebM)·작품 카드(PNG).',
+      '- 3차시(표현): 작가노트(질문·의도·근거) + 세션 데이터로 ‘관객의 초상’ 제작·상연. 산출물: 작가노트·시계열 CSV·상연 JSON.',
+      '- 4차시(감상·비평): 또래 작품 3층위 비평 + 루브릭 상호평가 + AI 편향 토론. 산출물: 비평·평가(.md)·상호평가 점수.', '',
+      '## 평가 루브릭 (각 1~4점, 총 20점)',
+      '- 의도: 작품이 던지는 질문이 분명한가',
+      '- 근거: 매핑/연출의 데이터·조형 근거가 있는가',
+      '- 조형: 색·움직임·구성이 의도를 살리는가',
+      '- 비평: AI가 놓친 것·편향을 짚었는가',
+      '- 윤리: 프라이버시·동의·낙인 방지를 지켰는가', '',
+      '## 윤리 지침',
+      '- 영상·얼굴은 브라우저 안에서만 처리(저장·전송 없음). 촬영엔 동의를 받는다.',
+      '- 나이·감정·안경은 모두 ‘추정’이며 자주 틀린다(편향). 사람을 낙인찍지 않게 상황·맥락 중심으로 표현한다.', '',
+      '## 참고 작가·작품',
+      '- ImageNet Roulette(크로퍼드·페이글런) / Zach Blas / Daniel Rozin / Camille Utterback / Rafael Lozano-Hemmer / Memo Akten'
+    ];
+    const blob = new Blob([md.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a'); a.download = 'lesson_plan_live_lens.md'; a.href = URL.createObjectURL(blob); a.click();
+    setStatus('수업 계획서(.md)를 내려받았어요.');
+  }
+
   /* ----------------------------- 카메라 ----------------------------- */
   async function startCam() {
     if (state.live) return;
@@ -649,7 +857,7 @@
       stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'user' } }, audio: false });
       video = document.createElement('video'); video.playsInline = true; video.muted = true; video.srcObject = stream;
       await video.play();
-      state.live = true; state.demo = false;
+      state.live = true; state.demo = false; clearReplay();
       const b = $('#btn-stg-cam'); if (b) { b.textContent = '■ 카메라 끄기'; b.classList.add('rec'); }
       $('#stg-cam-wrap').style.display = state.preview ? 'block' : 'none';
       if (state.faceOn) ensureFace().catch(() => setStatus('얼굴 분석 모델을 불러오지 못했어요 — 나이·감정·안경 없이 진행해요.', 'warn'));
@@ -737,7 +945,7 @@
     renderScenes(); selectScene(state.scene);
 
     $('#btn-stg-cam').addEventListener('click', toggleCam);
-    $('#btn-stg-demo').addEventListener('click', () => { stopCam(); state.demo = true; state.mirror = true; setStatus('가상 관객 데모 — 카메라·인터넷 없이 모든 연출을 체험해요.'); });
+    $('#btn-stg-demo').addEventListener('click', () => { stopCam(); state.demo = true; state.mirror = true; clearReplay(); setStatus('가상 관객 데모 — 카메라·인터넷 없이 모든 연출을 체험해요.'); });
     $('#btn-stg-upload').addEventListener('click', () => $('#stg-file').click());
     $('#stg-file').addEventListener('change', e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
     const fc = $('#stg-face'); if (fc) fc.addEventListener('change', e => toggleFace(e.target.checked));
@@ -752,6 +960,17 @@
     const bc = $('#btn-stg-bias-csv'); if (bc) bc.addEventListener('click', exportBiasCSV);
     const nb = $('#btn-stg-note'); if (nb) nb.addEventListener('click', saveArtCard);
     const cr = $('#btn-stg-crit'); if (cr) cr.addEventListener('click', exportCritique);
+    // ③⑤⑧ + 교사용
+    const so = $('#btn-stg-sound'); if (so) so.addEventListener('click', toggleSound);
+    const sr = $('#btn-stg-stat'); if (sr) sr.addEventListener('click', toggleStatRec);
+    const scsv = $('#btn-stg-stat-csv'); if (scsv) scsv.addEventListener('click', exportStatsCSV);
+    const ssend = $('#btn-stg-stat-send'); if (ssend) ssend.addEventListener('click', sendStatsToData);
+    const rp = $('#btn-stg-replay'); if (rp) rp.addEventListener('click', toggleReplay);
+    const rps = $('#btn-stg-replay-save'); if (rps) rps.addEventListener('click', exportReplay);
+    const rpo = $('#btn-stg-replay-open'); if (rpo) rpo.addEventListener('click', () => $('#stg-replay-file').click());
+    const rpf = $('#stg-replay-file'); if (rpf) rpf.addEventListener('change', e => { if (e.target.files[0]) loadReplayFile(e.target.files[0]); e.target.value = ''; });
+    const lp = $('#btn-stg-lesson'); if (lp) lp.addEventListener('click', exportLessonPlan);
+    statsCv = $('#stg-stats'); if (statsCv) { statsCtx = statsCv.getContext('2d'); drawStats(); }
     renderRubric(); renderReadout(); renderBiasLog();
 
     detectTick();                 // 라이브 감지 타이머 시작(라이브일 때만 동작)
@@ -759,5 +978,5 @@
   });
 
   // (테스트/디버그용 최소 창구)
-  window.LiveStage = { entities: () => entities, scene: () => state.scene, scenes: Object.keys(SCENES), bias: () => biasLog };
+  window.LiveStage = { entities: () => entities, scene: () => state.scene, scenes: Object.keys(SCENES), bias: () => biasLog, samples: () => statSamples.length, snaps: () => statSnaps.length, replay: () => state.replay, sound: () => state.sound };
 })();

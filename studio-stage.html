@@ -47,6 +47,18 @@
   .stg-ref:hover { border-color: var(--accent2); }
   .stg-ref b { display: block; margin-bottom: 2px; }
   .stg-ref span { color: var(--muted); font-size: 11.5px; }
+  /* 세션 데이터 */
+  #stg-stats { width: 100%; height: 90px; display: block; border: 1px solid var(--line); border-radius: 10px; background: #05070c; }
+  #stg-dist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; font-size: 12px; }
+  .stg-bar { flex: 1 1 90px; }
+  .stg-bar .lab { color: var(--muted); display: flex; justify-content: space-between; }
+  .stg-bar .track { height: 7px; background: var(--line); border-radius: 999px; overflow: hidden; margin-top: 2px; }
+  .stg-bar .fill { height: 100%; background: linear-gradient(90deg, var(--accent2), var(--accent)); width: 0; }
+  /* 교사용 표 */
+  .stg-lesson { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .stg-lesson th, .stg-lesson td { border: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top; }
+  .stg-lesson th { background: var(--panel2, #11131d); color: var(--accent2); }
+  .stg-lesson td:first-child { white-space: nowrap; color: var(--good); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -100,6 +112,7 @@
     <p id="stg-chips" style="margin-top:10px"></p>
     <div class="stg-tools" style="margin-top:6px">
       <button id="btn-stg-rec" class="btn">● 무대 녹화</button>
+      <button id="btn-stg-sound" class="btn">🔊 사운드 켜기</button>
       <button id="btn-stg-csv" class="btn">⬇ CSV 내보내기</button>
       <button id="btn-stg-send" class="btn accent2">→ 데이터 점 스튜디오로 보내기</button>
     </div>
@@ -180,6 +193,45 @@
       <a class="stg-ref" href="https://www.memo.tv/works/learning-to-see/" target="_blank" rel="noopener"><b>Learning to See — 메모 액텐</b><span>신경망이 카메라를 ‘자기가 아는 것’으로만 보는 작업</span></a>
     </div>
     <p class="hint" style="margin-top:10px">AI는 <b>나이·감정·안경·종</b>을 ‘추정’할 뿐, <b>이야기·관계·존엄</b>은 못 봐요. 노인을 ‘느림’으로만 본다면 그건 <b>기계의 편견</b> — 이 무대의 목표는 정확한 감지가 아니라 <b>그 편견을 드러내고 되묻는</b> 거예요.</p>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3 class="with-info">8 · 📈 세션 데이터 — 시간에 따른 관객 <span class="info-ic" data-info="data-humanism">ⓘ</span></h3>
+    <p class="muted" style="font-size:12px;margin:2px 0 8px">한 장면이 아니라 <b>시간의 흐름</b>을 데이터로 쌓아요 — 매초 인원·나이대·감정·안경·신뢰도를 기록해 <b>관객의 초상(데이터 포트레이트)</b>을 만듭니다. 쌓은 데이터로 <b>카메라 없이 작품을 다시 상연</b>할 수도 있어요.</p>
+    <div class="stg-tools" style="margin-bottom:8px">
+      <button id="btn-stg-stat" class="btn primary">● 세션 기록 시작</button>
+      <button id="btn-stg-replay" class="btn">▶ 데이터로 상연</button>
+    </div>
+    <canvas id="stg-stats" width="900" height="90"></canvas>
+    <div id="stg-dist"></div>
+    <div class="stg-tools" style="margin-top:10px">
+      <button id="btn-stg-stat-csv" class="btn sm">⬇ 시계열 CSV</button>
+      <button id="btn-stg-stat-send" class="btn sm accent2">→ 데이터 점 스튜디오로(시계열)</button>
+      <button id="btn-stg-replay-save" class="btn sm">⬇ 상연 데이터(JSON)</button>
+      <button id="btn-stg-replay-open" class="btn sm">📂 상연 데이터 열기</button>
+      <input id="stg-replay-file" type="file" accept="application/json,.json" hidden />
+    </div>
+    <p class="muted" style="font-size:11.5px;margin-top:8px">‘<b>데이터로 상연</b>’은 기록한 장면을 카메라·인터넷 없이 다시 살려요 — <b>작품 = 데이터의 상연</b>. 상연 데이터(JSON)를 저장해 두면 다른 기기에서도 같은 작품을 재생할 수 있어요(원본 영상·얼굴은 저장되지 않아요).</p>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h3>9 · 🎓 교사용 — 수업 설계 · 평가 연계</h3>
+    <p class="muted" style="font-size:12px;margin:2px 0 10px">미술과 <b>체험–표현–감상</b>의 한 바퀴로 설계했어요. 「<b>미술과 매체</b>」(융합선택)와 잘 맞고, 정보·사회(AI 윤리)·수학(데이터)과 융합됩니다. <b>성취기준 코드는 학교가 채택한 교육과정 문서에 맞춰 기입</b>하세요(아래는 연계 방향 가이드).</p>
+    <div style="overflow-x:auto">
+      <table class="stg-lesson">
+        <thead><tr><th>차시</th><th>영역</th><th>활동</th><th>도구</th><th>산출물·평가</th></tr></thead>
+        <tbody>
+          <tr><td>1차시</td><td>체험</td><td>‘기계의 눈’ 관찰 — 카메라/데모로 AI가 나를 어떻게 분류하는지 보고, 오분류를 찾아 기록</td><td>🔬 분류 폭로·오분류 기록</td><td>오분류(편향) 데이터 CSV · 관찰 메모</td></tr>
+          <tr><td>2차시</td><td>표현</td><td>연출 사례를 골라 매핑 설계 — 나이·감정·동물·안경을 색·움직임으로 ‘해석’</td><td>7개 연출 사례 · 무대</td><td>무대 영상(WebM) · 작품 카드(PNG)</td></tr>
+          <tr><td>3차시</td><td>표현</td><td>작가노트 작성(질문·의도·근거) + 세션 데이터로 ‘관객의 초상’ 제작·상연</td><td>✎ 작가노트 · 📈 세션 데이터 · 상연</td><td>작가노트 · 시계열 CSV · 상연 JSON</td></tr>
+          <tr><td>4차시</td><td>감상·비평</td><td>또래 작품을 3층위(사실→해석→가치)로 비평 + 루브릭 상호평가, AI 편향 토론</td><td>🔍 비평·루브릭 · 레퍼런스</td><td>비평·평가 문서(.md) · 상호평가 점수</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:10px 0 4px"><b>핵심 개념</b> 상호작용성·시간성·생성성·관객참여·데이터기반 · <b>역량</b> 미적 감수성·창의융합·시각적 소통·비평적 사고 · <b>윤리</b> 프라이버시·동의·편향·낙인 방지</p>
+    <div class="stg-tools" style="margin-top:8px">
+      <button id="btn-stg-lesson" class="btn">⬇ 수업 계획서 내려받기(.md)</button>
+    </div>
   </div>
 
   <p class="footer-note">도구의 눈을 의심하는 것, 그게 데이터 시대의 미술 · 영상은 저장하지 않아요 · 추정은 자주 틀려요</p>

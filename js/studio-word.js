@@ -67,6 +67,27 @@
     { r: 143, g: 192, b: 181, ratio: 0.18 }, { r: 201, g: 154, b: 64, ratio: 0.16 },
     { r: 122, g: 31, b: 18, ratio: 0.14 }
   ];
+  // 큐레이션 디자인 팔레트 — 그림 K-means 대신 '의도된 색 조합'을 한 번에 입힐 때.
+  //   색은 비율 내림차순(앞쪽일수록 지배색)이 되도록 아래에서 ratio를 자동 부여한다.
+  const DESIGN_PALETTES = {
+    hockney: { name: '호크니 프라이머리', colors: ['#2659b5', '#e8b21e', '#d23b3b', '#1b9e77', '#222831'] },
+    frida: { name: '프리다 수박', colors: ['#d1495b', '#2a7f3e', '#e3a51a', '#7a3b2e', '#241300'] },
+    picassoblue: { name: '피카소 청색기', colors: ['#163a6b', '#2f6fb0', '#6fa3cf', '#0d1f33', '#b9cfe3'] },
+    monet: { name: '모네 수련', colors: ['#5b8fb0', '#9ec9c2', '#c79bc4', '#6b9a6b', '#2e4a52'] },
+    vangogh: { name: '고흐 별밤', colors: ['#1b2a6b', '#3b5bbf', '#e8c84a', '#1f3a2e', '#0c1330'] },
+    klimtgold: { name: '클림트 골드', colors: ['#b8860b', '#e6c200', '#7a5c12', '#2b2410', '#d9b441'] },
+    ink: { name: '잉크 모노', colors: ['#10131a', '#2b3242', '#4a5468', '#7d8aa3', '#b9c2d6'] },
+    pastel: { name: '파스텔', colors: ['#e98ba0', '#f2c879', '#9bd2c2', '#9bbef0', '#c79be0'] },
+    vivid: { name: '비비드 팝', colors: ['#ff3b6b', '#ffb000', '#23c2a8', '#3b6bff', '#1a1a1a'] },
+    earth: { name: '흙빛 토르소', colors: ['#7a4b2b', '#b07b3e', '#caa56a', '#3e5a3e', '#241a12'] },
+    nordic: { name: '북유럽', colors: ['#2f3e46', '#52796f', '#84a98c', '#b08968', '#cad2c5'] }
+  };
+  // 작가 예시 → 어울리는 디자인 팔레트(‘작가 자동’ 선택 시).
+  const ARTIST_PALETTE = {
+    gogh: 'vangogh', monet: 'monet', seurat: 'pastel', hokusai: 'picassoblue', klimt: 'klimtgold',
+    munch: 'vivid', vermeer: 'ink', hockney: 'hockney', kahlo: 'frida', picasso: 'picassoblue'
+  };
+  const perfNow = () => (window.performance && performance.now) ? performance.now() : Date.now();
 
   const state = {
     rawText: '', allWords: [], words: [],            // allWords=전체 빈도, words=상위 N
@@ -78,6 +99,7 @@
     font: 'sans', weight: 800, italic: false, threeD: false, depth: 12, light: 45,
     scale: 'sqrt', minFont: 16, maxFont: 120, maxWords: 120, minLen: 2,
     particle: true, useStop: true, extraStop: [],
+    palettePreset: 'painting', paintingPalette: null, curatedName: '', fillGaps: true, mockup: false,
     seed: 12345, product: 'postcard', view: 'cloud', side: 'front',
     name: '', caption: ''
   };
@@ -133,17 +155,40 @@
 
   /* ===================== 그림 색(대표색 K·비율) ===================== */
   function analyzePalette(canvas, title) {
+    let pal = DEFAULT_PALETTE.slice();
     try {
       const res = ImageAnalysis.analyze(canvas, { K: state.K, space: 'lab', sampling: 'uniform', N: 1200, seed: state.seed });
-      state.palette = res.palette;                   // 비율 내림차순 정렬됨
-    } catch (e) { state.palette = DEFAULT_PALETTE.slice(); }
+      pal = res.palette;                             // 비율 내림차순 정렬됨
+    } catch (e) {}
+    state.paintingPalette = pal;
     _srcCanvas = canvas;
     state.paintingTitle = title || state.paintingTitle;
     state.srcThumb = thumbOf(canvas, 360);
     state.srcImg = thumbOf(canvas, 720);
-    renderPalette();
-    $('#paint-stat').textContent = (state.paintingTitle ? state.paintingTitle + ' · ' : '') + '대표색 ' + state.palette.length + '개 추출(비율 순)';
+    if (state.palettePreset === 'painting') state.palette = pal;   // 큐레이션 팔레트 사용 중이면 색은 유지
+    renderPalette(); paintStat();
     recolor(); renderLegend(); render();
+  }
+  function currentArtist() { const s = $('#sel-artist'); return s ? s.value : ''; }
+  function paintStat() {
+    const el = $('#paint-stat'); if (!el) return;
+    if (state.palettePreset === 'painting') el.textContent = (state.paintingTitle ? state.paintingTitle + ' · ' : '') + '대표색 ' + state.palette.length + '개 추출(비율 순)';
+    else el.textContent = '디자인 팔레트 · ' + (state.curatedName || '') + ' · ' + state.palette.length + '색 (그림 색 대신 의도된 조합)';
+  }
+  // 색 팔레트 출처 바꾸기: 'painting'=그림 K-means / 'artist'=작가 자동 / 그 외=큐레이션 키
+  function applyPalettePreset(key) {
+    state.palettePreset = key;
+    if (key === 'painting') {
+      state.palette = state.paintingPalette ? state.paintingPalette.slice() : DEFAULT_PALETTE.slice();
+    } else {
+      let pk = key === 'artist' ? (ARTIST_PALETTE[currentArtist()] || 'ink') : key;
+      const def = DESIGN_PALETTES[pk] || DESIGN_PALETTES.ink;
+      state.curatedName = (key === 'artist' ? '작가 자동 · ' : '') + def.name;
+      const pal = def.colors.map((h, i) => { const c = hexToRgb(h); return { r: c.r, g: c.g, b: c.b, ratio: Math.pow(0.72, i) }; });
+      const s = pal.reduce((a, p) => a + p.ratio, 0) || 1; pal.forEach(p => p.ratio /= s);
+      state.palette = pal;
+    }
+    renderPalette(); paintStat(); recolor(); renderLegend(); render();
   }
   function loadPaintingByKey(key) {
     if (!key) return;
@@ -471,13 +516,13 @@
     };
 
     const placed = [];
-    const budget = 1600;                            // ms 안전 예산
+    const budget = 2400;                            // ms 안전 예산(큰 낱말 배치)
     for (let i = 0; i < ws.length; i++) {
       const word = ws[i].w;
       let size = sizeOf(ws[i].c);
       const rot = state.rotate && rng() < 0.32;
       let ok = false, attempt = 0;
-      while (!ok && attempt < 3 && size >= state.minFont * 0.7) {
+      while (!ok && attempt < 4 && size >= state.minFont * 0.7) {
         const sp = spriteCells(word, size, rot, cell, state.pad);
         const found = spiralPlace(sp, grid, occ, cell, rng);
         if (found) {
@@ -488,15 +533,54 @@
             cx: found.oc * cell + sp.sw / 2, cy: found.or * cell + sp.sh / 2
           });
           ok = true;
-        } else { size = Math.round(size * 0.82); attempt++; }
+        } else { size = Math.round(size * 0.86); attempt++; }
       }
-      const now = (window.performance && performance.now) ? performance.now() : Date.now();
-      if (now - t0 > budget) { /* 예산 초과 → 나머지 작은 낱말은 생략 */ break; }
+      if (perfNow() - t0 > budget) { /* 예산 초과 → 나머지 작은 낱말은 생략 */ break; }
     }
+    const primaryCount = placed.length;
+    // 밀도 채움: 큰 글자 사이의 빈 공간을 작은 낱말로 메워 형태가 ‘꽉 찬 디자인’으로 보이게.
+    if (state.fillGaps) fillGapsPass(grid, occ, cell, rng, placed, t0, 3400);
+    const fillCount = placed.length - primaryCount;
     state.placed = placed;
-    const skipped = ws.length - placed.length;
-    $('#word-stat').textContent = `상위 ${ws.length}개 중 ${placed.length}개 배치` + (skipped > 0 ? ` · ${skipped}개는 틀이 좁아 생략(틀을 키우거나 낱말 수를 줄여 보세요)` : '');
+    const skipped = ws.length - primaryCount;
+    $('#word-stat').textContent = `상위 ${ws.length}개 중 ${primaryCount}개 배치`
+      + (fillCount > 0 ? ` · 빈 곳 ${fillCount}개를 작은 낱말로 채움` : '')
+      + (skipped > 0 ? ` · ${skipped}개는 틀이 좁아 생략(틀을 키우거나 낱말 수를 줄여 보세요)` : '');
     recolor(); renderLegend();
+  }
+  // 빈(허용·미점유) 격자 칸을 작은 낱말로 채운다 — 빈도 순으로 재활용해 면적≈빈도 느낌을 유지.
+  function fillGapsPass(grid, occ, cell, rng, placed, t0, deadlineMs) {
+    const cols = grid.cols, rows = grid.rows, ws = state.words;
+    if (!ws.length) return;
+    const empties = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const k = r * cols + c; if (grid.allowed[k] && !occ[k]) empties.push(k); }
+    if (!empties.length) return;
+    for (let i = empties.length - 1; i > 0; i--) { const j = (rng() * (i + 1)) | 0; const t = empties[i]; empties[i] = empties[j]; empties[j] = t; }
+    const base = Math.max(8, Math.round(state.minFont * 0.92));
+    const sizes = [base, Math.max(8, Math.round(base * 0.76)), Math.max(7, Math.round(base * 0.58))];
+    const maxPlace = clamp(state.maxWords * 2, 140, 460);
+    const stride = Math.max(1, Math.floor(empties.length / 1800));   // 칸이 매우 많으면 건너뛰며 시도
+    let wi = (state.seed >>> 3) % ws.length, placedN = 0, attempts = 0;
+    for (let e = 0; e < empties.length; e += stride) {
+      if (placedN >= maxPlace) break;
+      if ((attempts & 31) === 0 && perfNow() - t0 > deadlineMs) break;
+      const k = empties[e];
+      if (occ[k]) continue;
+      const cc = k % cols, rr = (k / cols) | 0;
+      for (let s = 0; s < sizes.length; s++) {
+        attempts++;
+        const idx = wi % ws.length, word = ws[idx].w;
+        const rot = state.rotate && rng() < 0.28;
+        const sp = spriteCells(word, sizes[s], rot, cell, state.pad > 0 ? 1 : 0);
+        const oc = cc - (sp.scols >> 1), or = rr - (sp.srows >> 1);
+        if (fits(sp, grid, occ, oc, or)) {
+          for (const [dc, dr] of sp.cells) occ[(or + dr) * cols + (oc + dc)] = 1;
+          placed.push({ idx, text: word, size: sizes[s], rot, cx: oc * cell + sp.sw / 2, cy: or * cell + sp.sh / 2, fill: true });
+          wi++; placedN++;
+          break;
+        }
+      }
+    }
   }
   // 나선 탐색: 마스크 중심에서 바깥으로 돌며 빈 자리를 찾는다.
   function spiralPlace(sp, grid, occ, cell, rng) {
@@ -562,7 +646,9 @@
   // 전체 미리보기 갱신
   function render() {
     const cv = $('#wcanvas'); if (!cv) return;
-    if (state.view === 'goods') drawProduct(cv);
+    if (state.view === 'goods') {
+      if (sceneEligible()) drawScene(cv); else drawProduct(cv);
+    }
     else {
       cv.width = state.layoutW; cv.height = state.layoutH;
       const ctx = cv.getContext('2d');
@@ -586,6 +672,40 @@
     else if (state.product === 'card') cardFront(ctx, w, h);
     else if (state.product === 'bookmark') bookmark(ctx, w, h);
     else stickerR(ctx, w, h);
+  }
+  // 목업 장면은 ‘보여주는 앞면’에만 — 뒷면(주소칸)은 평면 그대로가 실용적.
+  function sceneEligible() { return state.mockup && !(state.product === 'postcard' && state.side === 'back'); }
+  // 사실적 목업: 제품을 부드러운 스튜디오 배경 위에 바닥그림자·살짝 기울임·드롭섀도로 연출.
+  function drawScene(cv) {
+    const inner = document.createElement('canvas');
+    drawProduct(inner);
+    const iw = inner.width, ih = inner.height;
+    const padX = Math.round(iw * 0.34), padY = Math.round(ih * 0.2);
+    cv.width = iw + padX * 2; cv.height = ih + padY * 2;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, cv.height);
+    g.addColorStop(0, '#efece6'); g.addColorStop(0.6, '#e7e3db'); g.addColorStop(1, '#d7d2c7');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, cv.width, cv.height);
+    // 바닥 그림자(납작한 타원)
+    ctx.save();
+    ctx.translate(cv.width / 2, padY + ih * 0.985);
+    ctx.scale(1, 0.15);
+    ctx.fillStyle = 'rgba(38,33,26,.30)';
+    ctx.beginPath(); ctx.arc(0, 0, iw * 0.52, 0, 7); ctx.fill();
+    ctx.restore();
+    // 제품(살짝 기울임 + 드롭섀도)
+    ctx.save();
+    ctx.translate(cv.width / 2, cv.height / 2);
+    ctx.rotate(-2.4 * Math.PI / 180);
+    ctx.shadowColor = 'rgba(20,16,12,.34)';
+    ctx.shadowBlur = iw * 0.06;
+    ctx.shadowOffsetX = iw * 0.016; ctx.shadowOffsetY = iw * 0.05;
+    ctx.drawImage(inner, -iw / 2, -ih / 2);
+    ctx.restore();
+    // 옅은 비네팅으로 종이를 살짝 띄운다
+    const v = ctx.createRadialGradient(cv.width / 2, cv.height * 0.42, iw * 0.32, cv.width / 2, cv.height * 0.5, cv.width * 0.72);
+    v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,.10)');
+    ctx.fillStyle = v; ctx.fillRect(0, 0, cv.width, cv.height);
   }
   function paperFill(ctx, w, h) { ctx.fillStyle = bgCss(state.bg); ctx.fillRect(0, 0, w, h); }
   function darkInk() { const c = BG[state.bg]; return lum(c[0], c[1], c[2]) > 0.5 ? '#2a2f3a' : '#e9eef7'; }
@@ -677,7 +797,7 @@
     const prev = { view: state.view, side: state.side };
     state.view = 'goods'; state.side = side;
     const cv = document.createElement('canvas');
-    drawProduct(cv);
+    if (sceneEligible()) drawScene(cv); else drawProduct(cv);
     // 뒷면 미니 그림은 비동기 로드라, 한 박자 뒤 저장
     setTimeout(() => {
       const a = document.createElement('a'); a.download = 'goods_' + state.product + '_' + side + '_' + Date.now() + '.png';
@@ -718,6 +838,7 @@
       text: state.rawText, words: state.words.slice(0, 60),
       palette: state.palette, K: state.K, paintingTitle: state.paintingTitle, srcImg: state.srcImg,
       colorMode: state.colorMode, mono: state.mono, bg: state.bg, contrast: state.contrast,
+      palettePreset: state.palettePreset, fillGaps: state.fillGaps, mockup: state.mockup,
       shape: state.shape, letter: state.letter, strokes: state.strokes, brush: state.brush, ratio: state.ratio, pad: state.pad, rotate: state.rotate,
       font: state.font, weight: state.weight, italic: state.italic, threeD: state.threeD, depth: state.depth, light: state.light,
       scale: state.scale, minFont: state.minFont, maxFont: state.maxFont, maxWords: state.maxWords, minLen: state.minLen,
@@ -728,7 +849,7 @@
   function workThumb() {
     const prev = { view: state.view, side: state.side };
     state.view = 'goods'; state.side = 'front';
-    const cv = document.createElement('canvas'); drawProduct(cv);
+    const cv = document.createElement('canvas'); if (sceneEligible()) drawScene(cv); else drawProduct(cv);
     const t = thumbOf(cv, 360);
     state.view = prev.view; state.side = prev.side;
     return t;
@@ -793,6 +914,7 @@
     $('#btn-upload-img').addEventListener('click', () => $('#imgfile').click());
     $('#imgfile').addEventListener('change', e => { const f = e.target.files[0]; if (!f) return; const img = new Image(); img.onload = () => { const cv = document.createElement('canvas'); cv.width = img.naturalWidth; cv.height = img.naturalHeight; cv.getContext('2d').drawImage(img, 0, 0); analyzePalette(cv, f.name.replace(/\.[^.]+$/, '')); }; img.src = URL.createObjectURL(f); });
     bindRange('r-k', 'o-k', 'K', () => { /* K는 색만 바꿈 → 같은 그림을 K로 재분석 */ if (_srcCanvas) analyzePalette(_srcCanvas, state.paintingTitle); else { recolor(); render(); renderLegend(); } });
+    $('#sel-palette-src').addEventListener('change', e => applyPalettePreset(e.target.value));
 
     // 3) 색·배경 (가벼움: 재배치 없이 다시 칠하기)
     $('#sel-colormode').addEventListener('change', e => { state.colorMode = e.target.value; $('#mono-row').style.display = e.target.value === 'mono' ? 'flex' : 'none'; recolor(); render(); renderLegend(); });
@@ -811,6 +933,7 @@
     $('#sel-ratio').addEventListener('change', e => { state.ratio = +e.target.value; if (state.shape === 'draw') { sizeDrawPad(); renderDrawPad(); } layout(); });
     bindRange('r-pad', 'o-pad', 'pad', layout);
     $('#chk-rotate').addEventListener('change', e => { state.rotate = e.target.checked; layout(); });
+    $('#chk-fill').addEventListener('change', e => { state.fillGaps = e.target.checked; layout(); });
     $('#sel-font').addEventListener('change', e => { state.font = e.target.value; layout(); });
     $('#sel-weight').addEventListener('change', e => { state.weight = +e.target.value; layout(); });
     $('#chk-italic').addEventListener('change', e => { state.italic = e.target.checked; layout(); });
@@ -825,6 +948,7 @@
 
     // 6) 굿즈
     $('#sel-product').addEventListener('change', e => { state.product = e.target.value; const bb = $('#btn-png-back'); if (bb) { const pc = state.product === 'postcard'; bb.disabled = !pc; bb.title = pc ? '' : '뒷면은 엽서에만 있어요'; } if (state.view === 'goods') render(); });
+    $('#chk-mockup').addEventListener('change', e => { state.mockup = e.target.checked; if (state.view === 'goods') render(); });
     $('#in-name').addEventListener('input', e => { state.name = e.target.value; if (state.view === 'goods') render(); });
     $('#in-caption').addEventListener('input', e => { state.caption = e.target.value; if (state.view === 'goods') render(); });
     $('#btn-png-front').addEventListener('click', () => exportProduct('front'));
@@ -853,6 +977,7 @@
     if (!$('#in-title').value) $('#in-title').value = a.name + ' — 감상으로 만든 낱말 구름';
     analyzeText();
     if (loadPaint && a.painting) { const sp = $('#sel-painting'); if (sp) sp.value = a.painting; loadPaintingByKey(a.painting); }
+    if (state.palettePreset === 'artist') applyPalettePreset('artist');   // ‘작가 자동’이면 작가에 맞춰 팔레트 갱신
   }
 
   // 위키백과 요약 가져오기(선택·온라인). CORS 허용 공개 REST API. 실패 시 안내.

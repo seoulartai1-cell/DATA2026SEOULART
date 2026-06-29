@@ -15,6 +15,7 @@
 (function () {
   'use strict';
   const $ = s => document.querySelector(s);
+  const esc = s => (window.UI ? UI.escapeHTML(s) : String(s == null ? '' : s));
   const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
 
   /* ----------------------------- 모델 CDN(지연 로드 + 폴백) ----------------------------- */
@@ -94,8 +95,17 @@
   /* ----------------------------- 상태 ----------------------------- */
   const state = {
     scene: 'ages', faceOn: false, preview: true, mirror: true,
-    live: false, demo: true
+    live: false, demo: true, reveal: false
   };
+  let biasLog = [];   // 오분류(편향) 기록 — '기계의 눈' 비평용
+  // 평가 루브릭 5영역(미술교육: 의도·근거·조형·비평·윤리)
+  const RUBRIC = [
+    { key: 'intent', label: '의도 — 작품이 던지는 질문이 분명한가' },
+    { key: 'evidence', label: '근거 — 매핑/연출의 데이터·조형 근거가 있는가' },
+    { key: 'form', label: '조형 — 색·움직임·구성이 의도를 살리는가' },
+    { key: 'critique', label: '비평 — AI가 놓친 것·편향을 짚었는가' },
+    { key: 'ethics', label: '윤리 — 프라이버시·동의·낙인 방지를 지켰는가' }
+  ];
   let cocoModel = null, faceReady = false, faceLoading = false;
   let stream = null, video = null, srcCanvas = null;
   let entities = [];            // 현재 감지된 대상들(정규화 좌표)
@@ -231,7 +241,7 @@
       }
       entities = ents;
       drawPreview(W, H);
-      renderChips();
+      renderChips(); renderReadout();
     } catch (e) { /* coco 미로드/프레임 오류 */ }
     finally { detectBusy = false; }
   }
@@ -413,6 +423,7 @@
         artCtx.fillText(tag, cx0, cy0 + prof.baseR * sizeScale + 14);
       }
     });
+    if (state.reveal) drawHUD(ents, pad, IW, IH);   // 기계의 눈(분류 라벨 HUD)
   }
 
   function loop(ts) {
@@ -423,7 +434,7 @@
     raf = requestAnimationFrame(loop);
   }
   let lastChip = 0;
-  function renderChipsThrottled(t) { if (t - lastChip > 0.5) { lastChip = t; renderChips(); } }
+  function renderChipsThrottled(t) { if (t - lastChip > 0.5) { lastChip = t; renderChips(); renderReadout(); } }
 
   // 라이브 감지는 별도 타이머로(렌더와 분리, 과부하 방지)
   function detectTick() { if (state.live) { detectFrame(); } setTimeout(detectTick, 120); }
@@ -452,10 +463,11 @@
   function sendToData() {
     const rows = snapshotRows(); if (!rows.length) { UI.toast('감지된 대상이 없어요(카메라나 데모를 켜 보세요).'); return; }
     const sc = SCENES[state.scene];
+    const note = id => { const el = $('#' + id); return el ? el.value.trim() : ''; };
     const payload = {
-      name: '라이브 렌즈 · ' + sc.name, csv: rowsToCSV(rows),
+      name: note('stg-title') || ('라이브 렌즈 · ' + sc.name), csv: rowsToCSV(rows),
       issue: '🪞 라이브 렌즈에서 온 데이터 — 관객을 읽은 ‘' + sc.name + '’. 종류·나이·감정·안경을 점의 무엇으로 바꿀까요?',
-      intent: '', omit: 'AI는 겉모습만 분류 — 사람의 이야기·관계·존엄은 못 봄(나이·감정·안경은 추정값)'
+      intent: note('stg-intent'), omit: note('stg-evidence') || 'AI는 겉모습만 분류 — 사람의 이야기·관계·존엄은 못 봄(나이·감정·안경은 추정값)'
     };
     try { localStorage.setItem('dn_data_incoming', JSON.stringify(payload)); } catch (e) { UI.toast('전송 실패(용량).'); return; }
     UI.toast('데이터 점 스튜디오로 보냈어요!');
@@ -485,6 +497,145 @@
       try { recorder && recorder.stop(); } catch (e) {}
       recording = false; if (btn) { btn.textContent = '● 무대 녹화'; btn.classList.remove('rec'); }
     }
+  }
+
+  /* ----------------------------- 기계의 눈: 분류 폭로 · 오분류 기록 ----------------------------- */
+  function readoutText(e, i) {
+    const k = KINDS[e.kind] ? KINDS[e.kind].ko : (e.label || e.kind);
+    const parts = [];
+    if (e.age != null) parts.push('나이 ' + e.age);
+    if (e.gender) parts.push('성별 ' + (e.gender === 'female' ? '여' : e.gender === 'male' ? '남' : e.gender));
+    if (e.emotion) parts.push('표정 ' + (EMO_KO[e.emotion] || e.emotion));
+    if (e.kind !== 'animal' && e.kind !== 'object') parts.push('안경 ' + (e.glasses ? '예' : '아니오'));
+    else parts.push('라벨 ' + (e.label || ''));
+    parts.push('신뢰 ' + Math.round((e.score || 0) * 100) + '%');
+    return k + ' #' + (i + 1) + ' → ' + parts.join(' · ');
+  }
+  function renderReadout() {
+    const host = $('#stg-readout'); if (!host) return;
+    if (!entities.length) { host.innerHTML = '<span class="ro-miss">감지 0 — AI의 눈에 아무도 없음. 이 ‘빈자리’도 데이터예요.</span>'; return; }
+    host.innerHTML = entities.map((e, i) => '<span class="ro-k">' + esc(readoutText(e, i).split(' → ')[0]) + '</span> → ' + esc(readoutText(e, i).split(' → ')[1])).join('<br>') +
+      '<br><span class="ro-miss">※ 위 값은 모두 AI의 ‘추정’ — 조명·각도·인종·표정에 따라 자주 틀립니다.</span>';
+  }
+  function addBias() {
+    const ri = $('#stg-bias-real'), ni = $('#stg-bias-note');
+    const real = (ri && ri.value || '').trim(), note = (ni && ni.value || '').trim();
+    if (!real && !note) { UI.toast('무엇이 틀렸는지 적어 주세요.'); return; }
+    const seen = entities.slice(0, 6).map((e, i) => readoutText(e, i));
+    biasLog.push({ ai: seen.join(' | ') || '감지 0', real, note });
+    if (ri) ri.value = ''; if (ni) ni.value = '';
+    renderBiasLog();
+    setStatus('오분류를 기록했어요 · 총 ' + biasLog.length + '건 — 이게 ‘기계의 편향’ 데이터예요.');
+  }
+  function renderBiasLog() {
+    const host = $('#stg-bias-list'); if (!host) return;
+    host.innerHTML = biasLog.map((b, i) =>
+      '<div class="stg-bias-item"><b>✗ #' + (i + 1) + '</b> AI: ' + esc(b.ai) + '<br>실제: <b>' + esc(b.real || '—') + '</b> · 비평: ' + esc(b.note || '—') + '</div>').join('');
+  }
+  function exportBiasCSV() {
+    if (!biasLog.length) { UI.toast('기록된 오분류가 없어요.'); return; }
+    const q = s => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+    const csv = ['번호', 'AI_분류', '실제', '비평'].join(',') + '\n' +
+      biasLog.map((b, i) => [i + 1, q(b.ai), q(b.real), q(b.note)].join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a'); a.download = 'machine_bias_' + Date.now() + '.csv'; a.href = URL.createObjectURL(blob); a.click();
+    setStatus('오분류(편향) 데이터를 CSV로 저장했어요 · ' + biasLog.length + '건.');
+  }
+  // 무대 위 분류 라벨 오버레이(감시 HUD 느낌)
+  function drawHUD(ents, pad, IW, IH) {
+    artCtx.save();
+    artCtx.font = '11px ui-monospace, monospace'; artCtx.textAlign = 'left'; artCtx.textBaseline = 'bottom';
+    ents.forEach(e => {
+      const ex = state.mirror ? (1 - e.cx) : e.cx;
+      const x = pad + clamp(ex, 0, 1) * IW, y = pad + clamp(e.cy, 0, 1) * IH;
+      const bw = Math.max(42, (e.w || 0.1) * IW), bh = Math.max(42, (e.h || 0.12) * IH);
+      artCtx.strokeStyle = 'rgba(120,255,180,0.5)'; artCtx.lineWidth = 1; artCtx.strokeRect(x - bw / 2, y - bh / 2, bw, bh);
+      let tag = (KINDS[e.kind] ? KINDS[e.kind].ko : (e.label || e.kind));
+      if (e.age != null) tag += ' ' + e.age;
+      if (e.gender) tag += '·' + (e.gender === 'female' ? 'F' : 'M');
+      if (e.emotion) tag += '·' + (EMO_KO[e.emotion] || '');
+      if (e.glasses) tag += '·GL';
+      tag += ' ' + Math.round((e.score || 0) * 100) + '%';
+      artCtx.fillStyle = 'rgba(120,255,180,0.95)'; artCtx.fillText(tag, x - bw / 2 + 2, y - bh / 2 - 2);
+    });
+    artCtx.restore();
+  }
+
+  /* ----------------------------- 작가노트(작품 카드 PNG) ----------------------------- */
+  function wrapLines(ctx, text, maxW) {
+    const out = []; let line = '';
+    for (const ch of String(text)) { if (ctx.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; } else line += ch; }
+    if (line) out.push(line); return out;
+  }
+  function drawField(ctx, lbl, val, x, y, labelW, maxW, lh, maxLines) {
+    ctx.fillStyle = '#93A4E8'; ctx.font = 'bold 13px sans-serif'; ctx.fillText(lbl, x, y);
+    ctx.fillStyle = '#d6dbe8'; ctx.font = '13px sans-serif';
+    let lines = wrapLines(ctx, val, maxW); const trunc = lines.length > maxLines; lines = lines.slice(0, maxLines);
+    if (trunc && lines.length) lines[lines.length - 1] = lines[lines.length - 1].slice(0, -1) + '…';
+    lines.forEach((ln, i) => ctx.fillText(ln, x + labelW, y + i * lh));
+    return Math.max(1, lines.length);
+  }
+  function saveArtCard() {
+    const g = id => { const el = $('#' + id); return el ? el.value.trim() : ''; };
+    const title = g('stg-title'), intent = g('stg-intent');
+    if (!title || !intent) { UI.toast('작품 카드 저장 전에 ‘제목’과 ‘의도’를 채워 주세요.'); return; }
+    const question = g('stg-question'), evidence = g('stg-evidence');
+    const W = artCv.width, padX = 28, headH = 92;
+    const tmp = artCv.getContext('2d');  // 측정용
+    tmp.font = '13px sans-serif';
+    const maxW = W - padX - 64 - padX;
+    const f1 = Math.min(2, wrapLines(tmp, intent, maxW).length);
+    const f2 = evidence ? Math.min(2, wrapLines(tmp, evidence, maxW).length) : 0;
+    const bodyH = 18 + (f1 + f2 + 1) * 22 + 16 + 24;
+    const c = document.createElement('canvas'); c.width = W; c.height = artCv.height + headH + bodyH;
+    const x = c.getContext('2d');
+    x.fillStyle = '#0a0c12'; x.fillRect(0, 0, c.width, c.height);
+    x.textBaseline = 'top';
+    x.fillStyle = '#fff'; x.font = 'bold 26px sans-serif';
+    (function () { let t = title; while (t.length > 1 && x.measureText(t).width > W - padX * 2) t = t.slice(0, -1); x.fillText(t + (t !== title ? '…' : ''), padX, 22); })();
+    if (question) { x.fillStyle = '#9aa3bd'; x.font = '14px sans-serif'; const ql = wrapLines(x, 'Q. ' + question, W - padX * 2); x.fillText(ql[0] + (ql.length > 1 ? '…' : ''), padX, 58); }
+    x.drawImage(artCv, 0, headH);
+    let yy = headH + artCv.height + 16;
+    yy += drawField(x, '의도', intent, padX, yy, 64, maxW, 18, 2) * 18 + 6;
+    if (evidence) yy += drawField(x, '근거', evidence, padX, yy, 64, maxW, 18, 2) * 18 + 6;
+    const c2 = {}; entities.forEach(e => { const k = KINDS[e.kind] ? KINDS[e.kind].ko : e.kind; c2[k] = (c2[k] || 0) + 1; });
+    drawField(x, 'AI 분류', Object.entries(c2).map(([k, v]) => k + '×' + v).join(', ') || '감지 0', padX, yy, 64, maxW, 18, 1);
+    x.fillStyle = '#5b6480'; x.font = '11px sans-serif'; x.fillText('데이터의 눈 · 라이브 렌즈 · ' + SCENES[state.scene].name, padX, c.height - 22);
+    const a = document.createElement('a'); a.download = 'artcard_' + Date.now() + '.png'; a.href = c.toDataURL('image/png'); a.click();
+    setStatus('작품 카드(PNG)를 저장했어요 — 전시·발표·작업노트에 쓰세요.');
+  }
+
+  /* ----------------------------- 비평(3층위) + 루브릭 ----------------------------- */
+  function renderRubric() {
+    const host = $('#stg-rubric-body'); if (!host) return;
+    host.innerHTML = RUBRIC.map(r =>
+      '<tr><td>' + r.label + '</td><td style="text-align:right"><select class="stg-rub" data-k="' + r.key + '"><option value="0">–</option><option>1</option><option>2</option><option>3</option><option>4</option></select></td></tr>').join('');
+    host.querySelectorAll('.stg-rub').forEach(s => s.addEventListener('change', updateRubricTotal));
+  }
+  function updateRubricTotal() { let t = 0; document.querySelectorAll('.stg-rub').forEach(s => t += (+s.value || 0)); const el = $('#stg-rubric-total'); if (el) el.textContent = t; }
+  function rubricScores() { const o = {}; document.querySelectorAll('.stg-rub').forEach(s => o[s.dataset.k] = +s.value || 0); return o; }
+  function exportCritique() {
+    const g = id => { const el = $('#' + id); return el ? el.value.trim() : ''; };
+    const sc = rubricScores(); let total = 0; Object.values(sc).forEach(v => total += v);
+    const lines = [
+      '# 라이브 렌즈 — 감상·비평 · 평가',
+      '작품: ' + (g('stg-title') || '(제목 없음)') + ' · 연출: ' + SCENES[state.scene].name,
+      '평가자: ' + (g('stg-rubric-name') || '—'), '',
+      '## 작가노트',
+      '- 질문: ' + (g('stg-question') || '—'),
+      '- 의도: ' + (g('stg-intent') || '—'),
+      '- 근거: ' + (g('stg-evidence') || '—'), '',
+      '## 비평(3층위)',
+      '1) 사실: ' + (g('stg-crit-fact') || '—'),
+      '2) 해석: ' + (g('stg-crit-interp') || '—'),
+      '3) 가치: ' + (g('stg-crit-value') || '—'), '',
+      '## 루브릭(1~4)'
+    ].concat(RUBRIC.map(r => '- ' + r.label + ': ' + (sc[r.key] || 0)))
+      .concat(['합계: ' + total + ' / 20', '', '## 오분류(편향) 기록 ' + biasLog.length + '건'])
+      .concat(biasLog.map((b, i) => (i + 1) + ') AI: ' + b.ai + ' / 실제: ' + (b.real || '—') + ' / 비평: ' + (b.note || '—')));
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' });
+    const a = document.createElement('a'); a.download = 'critique_' + Date.now() + '.md'; a.href = URL.createObjectURL(blob); a.click();
+    setStatus('비평·평가를 내려받았어요(.md).');
   }
 
   /* ----------------------------- 카메라 ----------------------------- */
@@ -532,7 +683,7 @@
         const dets = await ensureCoco().then(m => m.detect(srcCanvas, 30));
         let ents = cocoToEntities(dets, W, H);
         if (state.faceOn) { try { await ensureFace(); const f = await faceEntities(W, H); if (f.length) ents = ents.filter(e => e.kind !== 'person').concat(f); } catch (e) {} }
-        entities = ents; drawPreview(W, H); renderChips();
+        entities = ents; drawPreview(W, H); renderChips(); renderReadout();
         setStatus(ents.length ? '사진 감지 완료 · ' + ents.length + '개 — 아래 무대에서 연출돼요.' : '아무것도 못 찾았어요 — 그 ‘빈자리’도 작품의 발언이에요.');
         $('#stg-cam-wrap').style.display = state.preview ? 'block' : 'none';
       } catch (e) { setStatus('모델을 불러오지 못했어요(네트워크 차단). 데모로 체험해 보세요.', 'warn'); state.demo = true; }
@@ -595,10 +746,18 @@
     const sb = $('#btn-stg-send'); if (sb) sb.addEventListener('click', sendToData);
     const pv = $('#stg-preview'); if (pv) pv.addEventListener('change', e => { state.preview = e.target.checked; const w = $('#stg-cam-wrap'); if (w) w.style.display = (state.preview && (state.live || (!state.demo && srcCanvas))) ? 'block' : 'none'; });
 
+    // 기계의 눈 · 작가노트 · 비평
+    const rv = $('#stg-reveal'); if (rv) rv.addEventListener('change', e => state.reveal = e.target.checked);
+    const ba = $('#btn-stg-bias-add'); if (ba) ba.addEventListener('click', addBias);
+    const bc = $('#btn-stg-bias-csv'); if (bc) bc.addEventListener('click', exportBiasCSV);
+    const nb = $('#btn-stg-note'); if (nb) nb.addEventListener('click', saveArtCard);
+    const cr = $('#btn-stg-crit'); if (cr) cr.addEventListener('click', exportCritique);
+    renderRubric(); renderReadout(); renderBiasLog();
+
     detectTick();                 // 라이브 감지 타이머 시작(라이브일 때만 동작)
     raf = requestAnimationFrame(loop);
   });
 
   // (테스트/디버그용 최소 창구)
-  window.LiveStage = { entities: () => entities, scene: () => state.scene, scenes: Object.keys(SCENES) };
+  window.LiveStage = { entities: () => entities, scene: () => state.scene, scenes: Object.keys(SCENES), bias: () => biasLog };
 })();

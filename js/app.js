@@ -92,9 +92,13 @@
   }
   function showThumb() {
     const c = $('#thumb');
+    const sw = sourceCanvas.width, sh = sourceCanvas.height, ar = sw / sh;
+    // '원본' 미리보기를 선명하게 — 180px로 줄여 CSS가 늘릴 때 흐릿하던 문제 해결.
+    // 긴 변을 1600px까지 내부 해상도로 그린다(원본보다 키우지 않음) → 패널 폭으로 축소되며 또렷.
+    const target = Math.min(sw, 1600);
     const ctx = c.getContext('2d');
-    const ar = sourceCanvas.width / sourceCanvas.height;
-    c.width = 180; c.height = Math.round(180 / ar);
+    c.width = Math.max(1, Math.round(target)); c.height = Math.max(1, Math.round(target / ar));
+    if (ctx.imageSmoothingQuality) ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(sourceCanvas, 0, 0, c.width, c.height);
     $('#thumb-wrap').classList.add('has');
   }

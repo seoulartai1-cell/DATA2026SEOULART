@@ -15,7 +15,7 @@
   /* ----------------------------- 상태(조작 설정) ----------------------------- */
   const state = {
     // 분석
-    K: 8, space: 'rgb', sampling: 'uniform', N: 4000, seed: 12345,
+    K: 8, space: 'rgb', sampling: 'uniform', N: 30000, seed: 12345,
     // 점
     size: 3, colorMode: 'cluster', mosaicCell: 0, lens: 'none', pointShape: 'circle', pointAlpha: 1, bg: 'night',
     // 움직임

@@ -109,9 +109,9 @@
     const reqK = Math.max(1, Math.floor(opts.K || 8));   // 학생이 입력한 K(클램프 전)
     const space = opts.space === 'lab' ? 'lab' : 'rgb';
     const sampling = opts.sampling || 'uniform';
-    const reqN = Math.max(100, Math.min(opts.N || 4000, 50000));   // 사용자가 정한 점 개수(클램프 전 기준)
-    // K가 매우 크면 더 많은 픽셀이 필요(색 수 확보) — 입력 K에 맞춰 분석 해상도를 키운다.
-    const maxDim = opts.maxDim || (reqK > 6000 ? 1200 : reqK > 1500 ? 960 : 768);
+    const reqN = Math.max(100, Math.min(opts.N || 4000, 120000));  // 사용자가 정한 점 개수(클램프 전 기준)
+    // 분석 해상도(긴 변 px): 점·색 표현의 '해상도'를 좌우한다. 사진이 뭉개지지 않도록 기본을 높였다.
+    const maxDim = opts.maxDim || (reqK > 6000 ? 1600 : reqK > 1500 ? 1400 : 1280);
     const seed = opts.seed != null ? opts.seed : 12345;
     const rng = KMeans.makeRNG(seed);
 
@@ -146,7 +146,7 @@
     // 점 개수 N: 사용자 설정(reqN)을 기본으로, 실제 K가 더 크면 점도 K만큼 자동 확보한다.
     //  - K색을 다 보여주려면 점이 최소 그만큼 필요(점<K면 일부 색은 점으로 나타나지 못함).
     //  - 그래서 N을 K보다 작게 두면 K가 점 개수를 '직접' 정한다(K를 키우면 점이 늘어남).
-    const N = Math.min(50000, Math.max(reqN, K));
+    const N = Math.min(120000, Math.max(reqN, K));
     const maxIter = K <= 64 ? 24 : K <= 256 ? 14 : K <= 1024 ? 10 : K <= 4096 ? 6 : K <= 12000 ? 4 : 2;
     const km = KMeans.cluster(data, K, { seed, maxIter });
 

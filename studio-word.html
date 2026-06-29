@@ -136,6 +136,25 @@
       <details open>
         <summary>2 · 그림 색 — 대표색(K)·비율 <span class="info-ic" data-info="word-color">ⓘ</span></summary>
         <div class="sect">
+          <label class="field" style="margin-top:0">색 팔레트 — 출처</label>
+          <select id="sel-palette-src">
+            <option value="painting">그림에서 추출 (K-means · 기본)</option>
+            <option value="artist">작가에 어울리는 자동 팔레트</option>
+            <optgroup label="디자인 팔레트(의도된 조합)">
+              <option value="hockney">호크니 프라이머리</option>
+              <option value="frida">프리다 수박</option>
+              <option value="picassoblue">피카소 청색기</option>
+              <option value="monet">모네 수련</option>
+              <option value="vangogh">고흐 별밤</option>
+              <option value="klimtgold">클림트 골드</option>
+              <option value="ink">잉크 모노</option>
+              <option value="pastel">파스텔</option>
+              <option value="vivid">비비드 팝</option>
+              <option value="earth">흙빛 토르소</option>
+              <option value="nordic">북유럽</option>
+            </optgroup>
+          </select>
+          <p class="muted" style="font-size:11px;margin:6px 0 2px">‘그림에서 추출’은 명화의 실제 색을, 디자인 팔레트는 의도된 색 조합을 글자에 입혀요.</p>
           <label class="field">그림 고르기 (퍼블릭 도메인 명화)</label>
           <select id="sel-painting"></select>
           <div class="row" style="margin-top:8px">
@@ -206,7 +225,8 @@
           </select>
           <label class="field">글자 사이 여백 <output id="o-pad">2</output></label>
           <input id="r-pad" type="range" min="0" max="6" step="1" value="2">
-          <label class="chk-row" style="margin-top:10px"><input type="checkbox" id="chk-rotate"> 세로(90°) 글자 섞기</label>
+          <label class="chk-row" style="margin-top:10px"><input type="checkbox" id="chk-fill" checked> 빈 곳을 작은 낱말로 채우기 — 밀도↑(디자인처럼 꽉 차게)</label>
+          <label class="chk-row" style="margin:6px 0"><input type="checkbox" id="chk-rotate"> 세로(90°) 글자 섞기</label>
           <label class="field">글꼴</label>
           <select id="sel-font">
             <option value="sans">굵은 고딕</option>
@@ -284,6 +304,7 @@
             <option value="bookmark">책갈피 (세로)</option>
             <option value="sticker">스티커/원형</option>
           </select>
+          <label class="chk-row" style="margin-top:8px"><input type="checkbox" id="chk-mockup"> 사실적 목업 장면으로 보기·저장 (그림자·기울임)</label>
           <label class="field">작가/제목 (큰 글씨)</label>
           <input id="in-name" type="text" placeholder="예: David Hockney">
           <label class="field">한 줄 설명/메시지 (작게)</label>

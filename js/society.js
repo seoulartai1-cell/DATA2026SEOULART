@@ -400,8 +400,79 @@
     } catch (e) { UI.toast('전시 실패: ' + (e && e.message ? e.message : e)); }
   }
 
+  /* ============ 🎧 도슨트 해설(분석을 목소리·글로 안내) ============ */
+  let socDoc = false, docLines = [], docIdx = 0, docTimer = null;
+  function docSpeak(text) {
+    if (!window.speechSynthesis) return;
+    try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = 'ko-KR'; u.rate = 1; speechSynthesis.speak(u); } catch (e) {}
+  }
+  // 지금 보고 있는 화면(세계 데이터 / 우리 이야기)에 맞춰 해설 대본을 만든다
+  function docentLines() {
+    const out = [];
+    if (type === 'sdg' && SDG && SDG[current]) {
+      const d = SDG[current];
+      out.push({ t: '🌍 ' + (d.sdg || '') + ' · ' + (d.label || d.title || ''), x: '세계 데이터로 보는 ‘' + (d.label || d.title || '이 지표') + '’입니다. ' + (d.rows ? d.rows + '개국' : '여러 나라') + '의 값을' + (d.latestYear ? ' ' + d.latestYear + '년 기준으로' : '') + ' 비교했어요. 같은 지구인데 나라마다 이렇게 다릅니다.' });
+      out.push({ t: '📊 세계 격차', x: '상위 나라와 하위 나라의 간극을 보세요. 이 격차가 바로 우리가 다시 그려야 할 ‘문제’입니다. 기준선을 어디에 긋느냐에 따라 무엇을 문제라 부를지가 달라져요.' });
+      out.push({ t: '🎨 다음 단계', x: '이 데이터를 작업실로 보내 색은 대륙, 크기는 값으로 매핑하면 세계의 격차가 한 장의 점 작품이 됩니다. 무엇을 강조할지는 작가인 당신의 선택이에요.' });
+      return out;
+    }
+    const s = L();
+    const rank = LENS.map(k => [k, s.lenses[k]]).sort((a, b) => b[1] - a[1]);
+    const top = rank[0], low = rank[rank.length - 1];
+    out.push({ t: '🏙 ' + (s.title || '우리 이야기'), x: '‘' + (s.title || '우리 이야기') + '’를 일곱 가지 비평 렌즈로 읽어 봅니다. 같은 사안도 어떤 렌즈로 보느냐에 따라 다르게 보여요.' });
+    out.push({ t: '🔎 가장 두드러진 렌즈 · ' + top[0], x: top[0] + ' 렌즈가 ' + Math.round(top[1] * 100) + '점으로 가장 높아요. ' + (LENS_DESC[top[0]] || '') + '. 이 사안에서 가장 크게 작동하는 힘입니다.' });
+    out.push({ t: '🩹 가장 약한 렌즈 · ' + low[0], x: low[0] + ' 렌즈는 ' + Math.round(low[1] * 100) + '점으로 가장 낮아요. ' + (LENS_DESC[low[0]] || '') + '. 여기가 이 사안의 빈틈일 수 있어요 — 무엇을 더 살펴야 할까요?' });
+    if (s.issues && s.issues.length) {
+      const byTight = s.issues.slice().sort((a, b) => Math.abs(a[1] - 50) - Math.abs(b[1] - 50));
+      const tight = byTight[0], clear = byTight[byTight.length - 1];
+      out.push({ t: '⚖ 가장 팽팽한 쟁점', x: '‘' + tight[0] + '’은 찬성 ' + tight[1] + '%로 의견이 팽팽하게 갈려요. 이런 쟁점일수록 서로의 이유를 끝까지 듣는 게 중요합니다.' });
+      if (clear !== tight) out.push({ t: '✅ 가장 뚜렷한 쟁점', x: '반대로 ‘' + clear[0] + '’은 찬성 ' + clear[1] + '%로 방향이 비교적 뚜렷해요.' });
+    }
+    out.push({ t: '🎨 다음 단계', x: '이 분석을 작업실로 보내면 렌즈·쟁점·관점이 점 작품의 재료가 됩니다. 색은 분류, 크기는 값 — 당신의 비평을 미술로 다시 말해 보세요.' });
+    return out;
+  }
+  function docPanel() { return $('#soc-docent-panel'); }
+  function stopDocent() {
+    socDoc = false; clearTimeout(docTimer); docTimer = null;
+    if (window.speechSynthesis) { try { speechSynthesis.cancel(); } catch (e) {} }
+    const b = $('#soc-docent'); if (b) b.textContent = '🎧 도슨트 해설';
+    const p = docPanel(); if (p) p.classList.remove('on');
+  }
+  function startDocent() {
+    docLines = docentLines();
+    if (!docLines.length) { UI.toast('해설할 내용이 없어요.'); return; }
+    socDoc = true; docIdx = 0;
+    const b = $('#soc-docent'); if (b) b.textContent = '⏹ 해설 끝';
+    const p = docPanel(); if (p) p.classList.add('on');
+    docentStep();
+  }
+  function docNextAuto() {
+    if (!socDoc) return;
+    if (docIdx >= docLines.length - 1) { stopDocent(); return; }
+    docIdx++; docentStep();
+  }
+  function docentStep() {
+    clearTimeout(docTimer);
+    if (!socDoc || !docLines.length) return;
+    docIdx = Math.max(0, Math.min(docIdx, docLines.length - 1));
+    const ln = docLines[docIdx], p = docPanel(); if (!p) return;
+    p.innerHTML = '<h4>' + esc(ln.t) + ' <span class="dby">· 도슨트 ' + (docIdx + 1) + '/' + docLines.length + '</span></h4>'
+      + '<p>' + esc(ln.x) + '</p>'
+      + '<div class="dctrl"><button id="sd-prev">‹ 이전</button><button id="sd-pause">⏸ 멈춤</button><button id="sd-next">다음 ›</button><button id="sd-exit">✕ 닫기</button></div>';
+    $('#sd-prev').onclick = () => { if (docIdx > 0) { docIdx--; docentStep(); } };
+    $('#sd-next').onclick = () => { if (docIdx >= docLines.length - 1) stopDocent(); else { docIdx++; docentStep(); } };
+    $('#sd-exit').onclick = stopDocent;
+    $('#sd-pause').onclick = () => {
+      if (docTimer) { clearTimeout(docTimer); docTimer = null; $('#sd-pause').textContent = '▶ 계속'; if (window.speechSynthesis) { try { speechSynthesis.cancel(); } catch (e) {} } }
+      else { $('#sd-pause').textContent = '⏸ 멈춤'; docSpeak(ln.x); docTimer = setTimeout(docNextAuto, 9500); }
+    };
+    docSpeak(ln.t.replace(/·/g, ' ') + '. ' + ln.x);
+    docTimer = setTimeout(docNextAuto, 9500);
+  }
+
   /* ============ 전환·초기화 ============ */
   function selectScenario(val) {
+    stopDocent();
     if (SDG && SDG[val]) { type = 'sdg'; current = val; renderSDG(val); }
     else if (LOCAL[val]) { type = 'local'; current = val; renderLocal(); }
   }
@@ -429,6 +500,7 @@
     const im = $('#soc-image'); if (im) im.addEventListener('click', () => downloadImage(false));
     const pos = $('#soc-poster'); if (pos) pos.addEventListener('click', () => downloadImage(true));
     const ex = $('#soc-exhibit'); if (ex) ex.addEventListener('click', exhibitWork);
+    const dc = $('#soc-docent'); if (dc) dc.addEventListener('click', () => { socDoc ? stopDocent() : startDocent(); });
     document.querySelectorAll('[data-send]').forEach(b => b.addEventListener('click', handoff));
     // 저장된 내 분석을 custom에 복원(있으면)
     try { const st = JSON.parse(localStorage.getItem('dn_society_save') || 'null'); if (st) applyState(st); } catch (e) {}

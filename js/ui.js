@@ -1,0 +1,350 @@
+/*
+ * ui.js: 공용 셸: 내비게이션 · 설명 팝업(ⓘ) · 토스트 · 안내 콜아웃
+ * -----------------------------------------------------------------------------
+ * 모든 페이지가 이 파일을 불러오고, <div id="app-header"></div> 한 줄만 두면
+ * 상단 내비가 자동으로 채워진다. 설명 아이콘은 [data-info="key"] 만 달면 동작한다.
+ */
+(function (global) {
+  'use strict';
+
+  // 저장된 테마를 가능한 한 일찍 적용(깜빡임 최소화)
+  /* 테마는 페이지별로 <html data-theme>로 고정(HANDOFF: 한 화면=한 컨셉). 전역 토글 없음. */
+
+  /*
+   * 내비는 '차시'를 축으로 선다.
+   * -----------------------------------------------------------------------------
+   * 예전에는 만들기 9 · 배우기 5 · 나누기 5 를 세 개의 평평한 목록으로 폈다. 그러면
+   * 같은 화면이 여기서는 만들기, 표에서는 배우기로 갈리고, 학생은 스무 개 링크 중
+   * 무엇이 오늘 것인지 알 수 없다. 교사가 말한 '산발적'의 정체가 이것이었다.
+   *
+   * 만들기·배우기·나누기라는 말은 버리지 않는다. 다만 그 세 낱말은 '한 차시 안에서만'
+   * 뜻을 가지므로, 「8차시」 메뉴의 각 차시 줄 안에서만 나타난다.
+   * 차시 ↔ 화면의 원본은 js/worksheet.js 의 COURSE 표 하나이고, 이 메뉴는 그것을 읽어 만든다.
+   */
+  const SLOT_KO = { learn: '배우기', make: '만들기', share: '나누기' };
+
+  // 차시가 없는 화면(언제든 꺼내 쓰는 것)과 내 기록. 이 둘만 손으로 적는다.
+  const NAV_TOOLS = [
+    { href: 'start.html', t: '사용 안내', s: '슬라이더·프리셋·ⓘ 조작법 · 순서와 상관없이' },
+    { href: 'studio-data.html', t: '데이터 점 스튜디오', s: '3~6차시가 함께 쓰는 공용 화면' },
+    { href: 'learn.html', t: '알고리즘 배움터', s: '개념을 쉬운 말에서 깊은 원리로' }
+  ];
+  const NAV_MINE = [
+    { href: 'worksheet.html', t: '학습지 전체 보기', s: '도구 화면에서는 오른쪽 아래 📄로 옆에 펼쳐져요' },
+    { href: 'notes.html', t: '작업 노트', s: '과정·버전·성찰 기록' },
+    { href: 'portfolio.html', t: '내 포트폴리오', s: '판단의 과정을 A4 한 장으로' },
+    { href: 'gallery.html', t: '전시 갤러리', s: '내 작품과 친구 작품 감상·비평' }
+  ];
+
+  /* COURSE 에서 「8차시」 메뉴를 만든다. worksheet.js 가 없는 화면(index·start)에서는 이 묶음을 뺀다. */
+  function sessionItems() {
+    const WS = global.WS;
+    if (!WS || !Array.isArray(WS.COURSE)) return null;
+    return WS.COURSE.filter(c => c.sheet !== 'cover').map(c => {
+      const n = c.sheet.replace('s', '');
+      const faces = ['learn', 'make', 'share']
+        .filter(k => (c[k] || []).length)
+        .map(k => ({ ko: SLOT_KO[k], href: WS.hrefOf(c[k][0], c.sheet) }));
+      return { n, sheet: c.sheet, badge: c.badge, faces };
+    });
+  }
+
+  const UI = {};
+  const cur = () => location.pathname.split('/').pop() || 'index.html';
+
+  /* 메뉴 다섯 묶음: 오늘 · 8차시 · 도구함 · 내 기록 · 교사 */
+  function buildNav() {
+    const nav = [{ label: '오늘', href: 'hub.html' }];
+    const ses = sessionItems();
+    if (ses) nav.push({ label: '8차시', sessions: ses });
+    nav.push({ label: '도구함', drop: NAV_TOOLS });
+    nav.push({ label: '내 기록', drop: NAV_MINE });
+    nav.push({ label: '교사', href: 'admin.html' });
+    return nav;
+  }
+
+  UI.mountHeader = function (activeOverride) {
+    const host = document.getElementById('app-header');
+    if (!host) return;
+    const active = activeOverride || cur();
+    const navHTML = buildNav().map((n, i) => {
+      if (n.sessions) {
+        // 차시 메뉴: 한 줄 = 한 차시. 그 안에서만 배우기·만들기·나누기가 나타난다.
+        const isActive = active === 'worksheet.html' || active === 'journey.html';
+        const rows = n.sessions.map(s =>
+          `<a class="navses" href="worksheet.html?s=${s.sheet}">
+             <span class="ns-n">${s.n}차시</span>
+             <span class="ns-t"><b class="ns-title" data-sheet="${s.sheet}">${escapeHTML(s.badge)}</b>
+               <small>${s.faces.map(f => `<i data-go="${f.href}">${f.ko}</i>`).join('')}</small></span></a>`).join('');
+        return `<div class="navdrop navdrop-ses" data-drop="${i}">
+            <button class="${isActive ? 'active' : ''}">${n.label} ▾</button>
+            <div class="navdrop-menu navdrop-wide">${rows}
+              <a class="navmore" href="journey.html">🗺 여정 지도 · 목표와 평가까지 한눈에</a></div></div>`;
+      }
+      if (n.drop) {
+        const isActive = n.drop.some(d => d.href === active);
+        const items = n.drop.map(d =>
+          `<a href="${d.href}" class="${d.href === active ? 'active' : ''}">${d.t}<small>${d.s}</small></a>`).join('');
+        return `<div class="navdrop" data-drop="${i}">
+            <button class="${isActive ? 'active' : ''}">${n.label} ▾</button>
+            <div class="navdrop-menu">${items}</div></div>`;
+      }
+      return `<a href="${n.href}" class="${n.href === active ? 'active' : ''}">${n.label}</a>`;
+    }).join('');
+
+    host.outerHTML = `
+      <header class="site-header">
+        <a class="site-brand" href="hub.html"><span class="logo">◎</span> 오늘의 시선</a>
+        <button class="nav-burger" id="nav-burger" aria-label="메뉴" aria-expanded="false">☰</button>
+        <nav class="site-nav">${navHTML}</nav>
+        <div class="site-user" id="site-user"></div>
+      </header>`;
+
+    // 드롭다운 토글
+    document.querySelectorAll('.navdrop').forEach(dd => {
+      dd.querySelector('button').addEventListener('click', e => {
+        e.stopPropagation();
+        document.querySelectorAll('.navdrop').forEach(o => { if (o !== dd) o.classList.remove('open'); });
+        dd.classList.toggle('open');
+      });
+    });
+    // 모바일 햄버거 토글
+    const burger = document.getElementById('nav-burger');
+    if (burger) burger.addEventListener('click', e => {
+      e.stopPropagation();
+      const hdr = burger.closest('.site-header');
+      const open = hdr.classList.toggle('nav-open');
+      burger.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    // 헤더 밖 클릭 시 드롭다운·모바일 패널 닫기(패널 안 클릭은 유지)
+    document.addEventListener('click', e => {
+      if (e.target.closest('.navdrop')) return;
+      document.querySelectorAll('.navdrop').forEach(o => o.classList.remove('open'));
+      if (!e.target.closest('.site-header')) {
+        const hdr = document.querySelector('.site-header');
+        if (hdr) { hdr.classList.remove('nav-open'); const b = hdr.querySelector('.nav-burger'); if (b) b.setAttribute('aria-expanded', 'false'); }
+      }
+    });
+    // 차시 줄의 배우기·만들기·나누기: 그 차시의 첫 화면으로 곧장 간다(줄 전체는 학습지로).
+    document.querySelectorAll('.navses [data-go]').forEach(el => {
+      el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); location.href = el.dataset.go; });
+    });
+    /*
+     * 차시 제목(「한 그림, 일곱 개의 눈」)은 학습지 색인에만 있다.
+     * 메뉴는 색인을 기다리지 않고 배지로 먼저 서고, 색인이 도착하면 제목으로 갈아 끼운다.
+     * file:// 로 열어 색인을 못 읽어도 메뉴는 이미 온전하다.
+     */
+    if (global.WS && WS.loadManifest) {
+      WS.loadManifest().then(ix => {
+        (ix.sheets || []).forEach(s => {
+          if (!s.title) return;
+          const el = document.querySelector('.ns-title[data-sheet="' + s.id + '"]');
+          if (el) el.textContent = s.title;
+        });
+      }).catch(() => { /* 색인이 없으면 배지 그대로 둔다 */ });
+    }
+
+    UI.renderUser();
+  };
+
+  function currentTheme() { return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'; }
+  function updateThemeIcon(btn) { const light = currentTheme() === 'light'; btn.textContent = light ? '🌙' : '🌞'; btn.title = light ? '어둡게' : '밝게'; }
+  UI.toggleTheme = function () {
+    const next = currentTheme() === 'light' ? 'dark' : 'light';
+    if (next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else document.documentElement.removeAttribute('data-theme');
+    try { localStorage.setItem('dn_theme', next); } catch (e) {}
+    const tt = document.getElementById('theme-toggle'); if (tt) updateThemeIcon(tt);
+  };
+
+  UI.renderUser = function () {
+    const el = document.getElementById('site-user');
+    if (!el) return;
+    const u = (global.Auth && Auth.current && Auth.current()) || null;
+    if (u) {
+      el.innerHTML = `<span class="dot"></span> <b>${escapeHTML(u.display || u.name)}</b>
+        <button class="btn sm ghost" id="btn-logout">로그아웃</button>`;
+      const lo = document.getElementById('btn-logout');
+      if (lo) lo.addEventListener('click', () => { Auth.logout(); location.href = 'index.html'; });
+    } else {
+      el.innerHTML = `<span class="dot off"></span> <a href="index.html">로그인</a>`;
+    }
+  };
+
+  /* ----------------------------- 모달 ----------------------------- */
+  function ensureModal() {
+    let m = document.getElementById('ui-modal');
+    if (m) return m;
+    m = document.createElement('div');
+    m.id = 'ui-modal'; m.className = 'modal-bg';
+    m.innerHTML = `<div class="modal-card"><div class="mc-head"><button class="modal-close" aria-label="닫기">✕</button>
+      <h2 id="ui-modal-title"></h2><div class="lv" id="ui-modal-lv"></div></div><div class="mc-body" id="ui-modal-body"></div></div>`;
+    document.body.appendChild(m);
+    m.addEventListener('click', e => { if (e.target === m) UI.closeModal(); });
+    m.querySelector('.modal-close').addEventListener('click', UI.closeModal);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') UI.closeModal(); });
+    return m;
+  }
+  UI.modal = function (title, bodyHTML, levelText) {
+    const m = ensureModal();
+    m.querySelector('#ui-modal-title').innerHTML = title;
+    m.querySelector('#ui-modal-lv').innerHTML = levelText || '';
+    m.querySelector('#ui-modal-body').innerHTML = bodyHTML;
+    m.classList.add('show');
+  };
+  UI.closeModal = function () { const m = document.getElementById('ui-modal'); if (m) m.classList.remove('show'); };
+
+  /* ----------------------------- 설명 팝업(ⓘ) ----------------------------- */
+  UI.info = function (key) {
+    const e = (global.EXPLAIN || {})[key];
+    if (!e) { UI.toast('설명 준비 중: ' + key); return; }
+    const badge = e.badge === 'adv' ? '<span class="badge adv">심화</span>' : '<span class="badge core">핵심</span>';
+    let body = '';
+    if (e.easy) body += section('easy', '🟡 쉽게: 한눈에', e.easy);
+    if (e.deep) body += section('deep', '🔵 더 깊이: 원리', e.deep);
+    if (e.limit) body += section('limit', '🔴 이 분석이 놓친 것 (한계)', e.limit);
+    if (e.ideas && e.ideas.length) {
+      body += section('idea', '🟢 이렇게 해보면: 아이디어',
+        '<ul>' + e.ideas.map(i => `<li>${i}</li>`).join('') + '</ul>');
+    }
+    UI.modal(escapeHTML(e.title) + ' ' + badge, body, 'ⓘ 설명은 쉬운 버전 → 깊은 버전 → 한계 → 아이디어 순서예요.');
+  };
+  function section(cls, head, html) {
+    return `<div class="lvl ${cls}"><div class="lvl-h">${head}</div><div class="lvl-b">${html}</div></div>`;
+  }
+  UI.infoButton = function (key, label) {
+    return `<button class="info-ic" data-info="${key}" title="${label || '설명 보기'}" aria-label="설명">ⓘ</button>`;
+  };
+  // 전역 위임: 어떤 페이지든 [data-info] 클릭이면 팝업
+  document.addEventListener('click', e => {
+    const b = e.target.closest('[data-info]');
+    if (b) { e.preventDefault(); UI.info(b.getAttribute('data-info')); }
+  });
+
+  /* ----------------------------- 토스트 ----------------------------- */
+  UI.toast = function (msg, ms) {
+    let t = document.getElementById('ui-toast');
+    if (!t) { t = document.createElement('div'); t.id = 'ui-toast'; t.className = 'toast'; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add('show');
+    clearTimeout(UI.toast._t); UI.toast._t = setTimeout(() => t.classList.remove('show'), ms || 2400);
+  };
+
+  /* ----------------------------- 안내 콜아웃 / 아이디어 로테이터 ----------------------------- */
+  UI.callout = function (html, type) {
+    const ic = type === 'warn' ? '⚠️' : type === 'info' ? '💬' : '💡';
+    return `<div class="callout ${type || ''}"><span class="ic">${ic}</span><div>${html}</div></div>`;
+  };
+  // 컨테이너(id)에 페이지별 아이디어를 한 개씩 돌려가며 보여줌
+  UI.mountIdeaBar = function (containerId, pageKey) {
+    const host = document.getElementById(containerId);
+    if (!host) return;
+    const list = ((global.GUIDE || {})[pageKey] || (global.GUIDE || {}).general || []).slice();
+    if (!list.length) return;
+    let i = Math.floor(Math.random() * list.length);
+    const render = () => {
+      host.innerHTML = `<div class="callout idea-rotator"><span class="ic">💡</span>
+        <div><b>아이디어</b> · ${list[i]}</div><span class="next">다음 ▸</span></div>`;
+      host.querySelector('.idea-rotator').addEventListener('click', () => { i = (i + 1) % list.length; render(); });
+    };
+    render();
+  };
+
+  function escapeHTML(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  UI.escapeHTML = escapeHTML;
+
+  // 사이트 공통 푸터(저작권): 모든 페이지 맨 아래
+  // 사이트 공통 풋터: HANDOFF 다크 크레딧(모든 페이지 동일, 항상 다크 #0A0E26).
+  UI.mountFooter = function () {
+    if (document.getElementById('site-footer')) return;
+    const f = document.createElement('footer');
+    f.id = 'site-footer';
+    f.innerHTML = '<div class="ft-inner">'
+      + '<a class="ft-brand" href="hub.html"><span class="ft-logo">◎</span> 오늘의 시선</a>'
+      + '<nav class="ft-nav"><a href="hub.html">HUB</a><a href="lab.html">ANALYSIS</a><a href="studio-color.html">STUDIO</a><a href="gallery.html">GALLERY</a></nav>'
+      + '<p class="ft-credit">© 2026 <b>「오늘의 시선」 데이터 미디어아트 스튜디오</b> · All rights reserved (저작자·소속 정보는 심사용 블라인드 처리)</p>'
+      + '</div>';
+    document.body.appendChild(f);
+  };
+
+  // 어려운 낱말에 점선 밑줄 + 호버 정의(낱말 사전). 본문 프로즈 안에서 용어별 '첫 1회'만.
+  // 단순 뜻을 넘어 '무엇을 기준으로/어떤 알고리즘인지/무엇으로 변환되는지'까지 짧게 가르친다.
+  const GLOSS = {
+    'K-means': '그림의 수많은 색을 비슷한 것끼리 K개 무리로 묶고, 무리마다 ‘가운데 색’ 하나로 대신하는 색 요약 알고리즘. K가 클수록 자세해요.',
+    '대표색': 'K-means가 묶은 무리의 색. 개수(K)는 작으면(5~8) 단순·추상, 크면(20~50) 사진처럼 자세해져요. 이미지의 실제 색 수·성능에 맞춰 자동 조정돼요. 정답은 없고, 바꿔 비교하는 게 공부예요.',
+    '알고리즘': '컴퓨터가 따르는, 차례가 정해진 방법(라면 끓이는 순서처럼). 이 사이트의 분석·요약·움직임이 모두 알고리즘이에요.',
+    '군집': '비슷한 것끼리 모은 한 덩어리(무리). 색을 모으면 ‘색 군집’.',
+    '매핑': '데이터의 한 값을 점의 한 특성에 이어 주는 것. 예를 들어 큰 값→큰 점, 높은 값→위쪽, 종류→색, 변화→떨림. 무엇을 어디에 잇느냐가 곧 해석이에요.',
+    '정규화': '크기가 제각각인 숫자를 0~1로 맞춰 공평히 비교하는 것(키 cm와 몸무게 kg을 같은 잣대로).',
+    '샘플링': '모든 픽셀 대신 일부만 골라 점으로 쓰는 것. 어디서 더 고를지(밝은 곳·윤곽)가 표현 선택이 돼요.',
+    '헤르츠': '소리가 1초에 떨리는 횟수(Hz). 적으면 낮은 소리(둥둥), 많으면 높은 소리(삐-). 소리의 ‘높낮이’예요.',
+    'Hz': '헤르츠. 소리가 1초에 떨리는 횟수. 음높이(피치)의 단위로, 가장 강한 주파수를 골라 구해요.',
+    '음높이': '소리에서 가장 강한 주파수(Hz). 낮으면 저음, 높으면 고음. 소리를 색·높이로 바꿀 때 쓰는 핵심 값.',
+    '주파수': '소리의 떨림이 빠른 정도. 낮은 주파수=저음, 높은 주파수=고음. 저·중·고로 나눠 에너지를 재요.',
+    '날카로움': '소리 에너지가 높은 주파수에 쏠린 정도(스펙트럼 무게중심). 높을수록 쉭·치 하는 밝고 날카로운 소리.'
+  };
+  UI.glossify = function () {
+    try {
+      if (document.getElementById('gloss-style')) return;
+      const st = document.createElement('style'); st.id = 'gloss-style';
+      st.textContent = '.gloss{border-bottom:1px dotted currentColor;cursor:help;position:relative}' +
+        '.gloss-pop{position:absolute;left:0;bottom:130%;width:max-content;max-width:250px;background:#11131d;color:#e8ecf6;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.5;box-shadow:0 8px 24px rgba(0,0,0,.4);opacity:0;visibility:hidden;transform:translateY(4px);transition:.15s;z-index:50;pointer-events:none;white-space:normal;font-weight:400}' +
+        '.gloss:hover .gloss-pop,.gloss:focus .gloss-pop{opacity:1;visibility:visible;transform:translateY(0)}';
+      document.head.appendChild(st);
+      const SKIP = { SCRIPT: 1, STYLE: 1, A: 1, BUTTON: 1, INPUT: 1, TEXTAREA: 1, SELECT: 1, OPTION: 1, CODE: 1, H1: 1 };
+      const terms = Object.keys(GLOSS), seen = {};
+      const roots = document.querySelectorAll('.page-head, .card, .callout, .hint, .muted');
+      roots.forEach(root => {
+        if (terms.every(t => seen[t])) return;
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+          acceptNode(n) {
+            if (!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+            let p = n.parentNode;
+            while (p && p !== root.parentNode) { if (SKIP[p.nodeName] || (p.classList && p.classList.contains('gloss'))) return NodeFilter.FILTER_REJECT; p = p.parentNode; }
+            return NodeFilter.FILTER_ACCEPT;
+          }
+        });
+        const nodes = []; let nd; while ((nd = walker.nextNode())) nodes.push(nd);
+        nodes.forEach(textNode => {
+          for (const term of terms) {
+            if (seen[term]) continue;
+            const idx = textNode.nodeValue.indexOf(term);
+            if (idx < 0) continue;
+            seen[term] = 1;
+            const after = textNode.splitText(idx);
+            after.nodeValue = after.nodeValue.slice(term.length);
+            const span = document.createElement('span');
+            span.className = 'gloss'; span.tabIndex = 0; span.textContent = term;
+            const pop = document.createElement('span'); pop.className = 'gloss-pop'; pop.textContent = GLOSS[term];
+            span.appendChild(pop);
+            after.parentNode.insertBefore(span, after);
+            break;   // 한 텍스트노드당 한 번
+          }
+        });
+      });
+    } catch (e) { /* 용어 툴팁은 보조 기능: 실패해도 페이지는 그대로 동작 */ }
+  };
+
+  /* ----------------------------- 탭(dn-tabwrap) 자동 연결 ----------------------------- */
+  // .dn-tabwrap 안의 .dn-tab(버튼, data-tab) ↔ .dn-tabpanel(data-tabpanel)을 묶는다.
+  // 전환 시 resize 이벤트를 쏘아, 숨겨졌던 패널의 캔버스(차트 등)가 올바른 크기로 다시 그려지게 한다.
+  UI.initTabs = function (root) {
+    (root || document).querySelectorAll('.dn-tabwrap').forEach(wrap => {
+      const tabs = Array.from(wrap.querySelectorAll('.dn-tab'));
+      const panels = Array.from(wrap.querySelectorAll('.dn-tabpanel'));
+      if (!tabs.length) return;
+      function activate(key) {
+        tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === key));
+        panels.forEach(p => { p.hidden = (p.dataset.tabpanel !== key); });
+        try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+        // 탭이 바뀔 때마다 알림: 숨김 패널의 지연 렌더(목록/순위/차트 등)에 쓰라고.
+        try { wrap.dispatchEvent(new CustomEvent('dn:tab', { detail: { key, wrap }, bubbles: true })); } catch (e) {}
+      }
+      tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+      const init = tabs.find(t => t.classList.contains('active')) || tabs[0];
+      activate(init.dataset.tab);
+    });
+  };
+
+  global.UI = UI;
+  document.addEventListener('DOMContentLoaded', () => { UI.mountHeader(); UI.mountFooter(); UI.glossify(); UI.initTabs(); });
+})(window);
